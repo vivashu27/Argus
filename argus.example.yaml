@@ -1,0 +1,69 @@
+# Argus configuration — copy to argus.yaml in your project root.
+#
+# Precedence: CLI flag > argus.yaml > built-in default.
+
+scan:
+  # Asset domains to discover. Omit to scan everything.
+  include:
+    - claude-code
+    - claude-desktop
+    - mcp
+    - skills
+    - plugins
+    - hooks
+    - instructions
+    - filesystem
+
+  # Check IDs to skip. Exclusion always wins over inclusion.
+  exclude: []
+    # - CLAUDE-005
+
+  # Check families to run. Omit for all.
+  # categories: [mcp, secrets]
+
+  # AASB level. 1 = basic hygiene only; 2 = full benchmark (default).
+  # level: 2
+
+  # Project root. Defaults to the current directory.
+  # path: .
+
+# Exit-code gate: fail on this severity and above. Same as --fail-on.
+# Independent of --severity, which only filters what is displayed.
+severity_threshold: high
+
+scoring:
+  # Deduction weight per severity. Only the keys you set are overridden.
+  weights:
+    CRITICAL: 25
+    HIGH: 10
+    MEDIUM: 3
+    LOW: 1
+    INFO: 0
+
+  # Whether accepted-risk findings still deduct from the score.
+  # false (default): governance decisions do not depress the score.
+  # true: the score reflects real posture regardless of sign-off.
+  score_accepted_risk: false
+
+report:
+  formats:
+    - terminal
+    # - json
+    # - html
+    # - sarif
+  # Required when more than one file format is selected.
+  # output: ./reports
+
+# Accepted risks.
+#
+# An exception suppresses *gating*, never *visibility*. The finding still appears in
+# every report as "FAIL — ACCEPTED RISK", but stops tripping the exit code and (by
+# default) stops deducting from the score.
+#
+# An expired exception is NOT honoured: the finding reverts to a normal FAIL and the
+# expiry is reported in scan metadata. Omit `asset` to apply to every asset.
+exceptions: []
+  # - check_id: MCP-003
+  #   asset: mcp:filesystem
+  #   reason: "Required for the internal development environment; tracked in SEC-1421"
+  #   expires: "2027-01-01"

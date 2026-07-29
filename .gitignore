@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environments
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Scan output — contains hostnames, local file paths and findings about the
+# machine it ran on. Never commit these.
+reports/
+*.sarif
+argus-report-*
+
+# Local scanner configuration
+argus.yaml
+
+# Local working files, not part of the project
+project_outline.txt
+claude_session

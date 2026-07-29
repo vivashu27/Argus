@@ -1,0 +1,247 @@
+# Argus
+
+**AI Agent Security Configuration Auditor**
+
+Argus audits the configuration of AI-agent environments — Claude Code, Claude Desktop,
+MCP servers, Skills, Plugins, hooks, and `CLAUDE.md` instruction files — against the
+**Argus Agent Security Benchmark (AASB)**, a CIS-inspired configuration baseline.
+
+It is conceptually similar to Prowler, ScoutSuite, Lynis, Trivy and OpenSCAP, but for the
+agent layer rather than cloud accounts or hosts.
+
+> Argus is **not affiliated with or certified by** CIS, Anthropic, OpenAI, or any other
+> organization. AASB is an original Argus benchmark inspired by CIS-style baselines; it is
+> not a CIS Benchmark.
+
+---
+
+## Read-only by design
+
+Argus treats every discovered file as untrusted input. It **never**:
+
+- modifies configuration, Skills, Plugins, hooks, or user files
+- installs anything
+- executes Skills, Plugins, MCP servers, or hooks
+- runs commands found in configuration or instruction files
+- deserializes scanned content into executable objects (`yaml.safe_load` only)
+
+It is intended to be safe to point at a deliberately malicious configuration. See
+[`docs/threat-model.md`](docs/threat-model.md).
+
+---
+
+## Install
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+```
+
+Requires Python 3.10+. Runs on Linux, macOS and Windows with OS-aware path discovery.
+
+## Quick start
+
+```bash
+argus scan                        # audit this environment, terminal report
+argus scan --verbose              # include evidence, coverage, score derivation
+argus scan --format html -o ./reports
+argus list-checks                 # every registered check
+argus list-benchmarks             # AASB sections and levels
+argus info MCP-003                # full metadata for one check
+argus check CLAUDE-006            # run a single check
+```
+
+### Targeting
+
+`--target` selects *what was discovered*; `--category` selects *what kind of check*.
+They are independent axes and combine with AND.
+
+```bash
+argus scan --target mcp --target skills
+argus scan --category secrets
+argus scan --level 1              # basic hygiene only
+argus scan --check MCP-003 --check MCP-004
+argus scan --exclude CLAUDE-005   # exclusion always wins over inclusion
+```
+
+### Severity vs exit codes
+
+Two independent gates:
+
+```bash
+argus scan --severity medium      # report gate: show MEDIUM and above
+argus scan --fail-on critical     # exit-code gate: only CRITICAL fails CI
+```
+
+| Exit code | Meaning |
+|---|---|
+| `0` | No FAIL findings at or above `--fail-on` |
+| `1` | FAIL findings at or above `--fail-on` |
+| `2` | Scanner error |
+| `3` | Usage or configuration error |
+
+`WARN` and `MANUAL` never gate the exit code. `--exit-zero` forces `0` whenever the scan
+completed.
+
+### Output formats
+
+`terminal` (default), `json`, `yaml`, `csv`, `markdown`, `html`, `sarif`.
+
+`--format` is repeatable. With `--output DIR`, files are written as
+`argus-report-<UTC timestamp>.<ext>`. More than one file format without `--output` is a
+usage error.
+
+```bash
+argus scan --format json --format sarif --format html --output ./reports
+```
+
+---
+
+## Configuration
+
+`argus.yaml` in the project root, or `--config PATH`. Precedence is
+**CLI flag > argus.yaml > built-in default**.
+
+```yaml
+scan:
+  include: [claude-code, claude-desktop, mcp, skills, plugins, hooks, instructions]
+  exclude: [CLAUDE-005]
+  level: 2
+
+severity_threshold: high      # exit-code gate; same as --fail-on
+
+scoring:
+  weights: { CRITICAL: 25, HIGH: 10, MEDIUM: 3, LOW: 1, INFO: 0 }
+  score_accepted_risk: false
+
+report:
+  formats: [terminal, html, json, sarif]
+  output: ./reports
+
+exceptions:
+  - check_id: MCP-003
+    asset: mcp:filesystem
+    reason: "Required for internal development environment"
+    expires: "2027-01-01"
+```
+
+### Accepted risk
+
+An exception suppresses **gating**, never **visibility**. An accepted finding:
+
+- displays as `FAIL — ACCEPTED RISK`
+- deducts 0 from the score (override with `scoring.score_accepted_risk: true`)
+- does not trip the exit code
+- is still counted and listed in every report
+
+An **expired** exception is not honoured: the finding reverts to a normal `FAIL` and the
+expiry is reported in scan metadata.
+
+---
+
+## Scoring
+
+The score is a weighted deduction from 100, and every deduction appears in the report so
+it can be recomputed by hand:
+
+```
+deduction = weight[severity] × status_multiplier × confidence_multiplier
+
+weight:      CRITICAL 25  HIGH 10  MEDIUM 3  LOW 1  INFO 0
+status:      FAIL 1.0     WARN 0.5   others 0.0
+confidence:  HIGH 1.0     MEDIUM 0.8  LOW 0.5
+
+score = round(max(0, 100 − Σ deductions))
+```
+
+`MANUAL`, `NOT_APPLICABLE` and `ERROR` never deduct — an unevaluated control is not a
+passing control, and is reported separately rather than folded into the score. Grades:
+A ≥ 90, B ≥ 80, C ≥ 70, D ≥ 60, F < 60.
+
+Full derivation in [`docs/scoring.md`](docs/scoring.md).
+
+---
+
+## The benchmark
+
+**AASB v1.0** — 63 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
+derived (`CLAUDE-001` → AASB `1.1`).
+
+| § | Section | Prefix | Checks |
+|---|---|---|---|
+| 1 | Claude Configuration | `CLAUDE-` | 10 |
+| 2 | MCP Security | `MCP-` | 12 |
+| 3 | Skills | `SKILL-` | 10 |
+| 4 | Plugins | `PLUGIN-` | 8 |
+| 5 | Hooks | `HOOK-` | 6 |
+| 6 | Instruction Files | `INSTR-` | 5 |
+| 7 | Secrets | `SECRET-` | 5 |
+| 8 | Filesystem | `FS-` | 7 |
+
+**Level 1** — basic hygiene: concrete misconfigurations, low false-positive rate,
+remediation that does not materially reduce usability.
+**Level 2** — defense in depth: tightening that may constrain legitimate workflows, or
+heuristic/contextual risk.
+
+Reference: [`docs/checks.md`](docs/checks.md) and [`docs/benchmark.md`](docs/benchmark.md).
+
+---
+
+## Honest reporting
+
+Argus is built to avoid the two failure modes that make security scanners useless:
+
+- **It will not guess.** A control that cannot be determined from static evidence returns
+  `MANUAL`, never an assumed `PASS`. Manual checks are reported separately and never
+  improve the score.
+- **It will not cry wolf.** Dangerous-command detection is tiered, so a bare `curl` is
+  informational while `curl … | sh` fails. Prompt-injection matches inside code fences,
+  blockquotes and labelled examples are downgraded, because security documentation
+  legitimately quotes those phrases.
+- **It will not assert intent.** Static analysis cannot establish motive. Findings say
+  *"Potential prompt injection detected"*, never *"malicious"*.
+- **It never prints a secret.** Detected credentials are redacted to `AKIA…XXXX` at the
+  point of detection, in every output channel including JSON, SARIF and logs.
+
+---
+
+## CI/CD
+
+SARIF output is suitable for GitHub Security:
+
+```yaml
+- run: argus scan --format sarif --output ./reports --fail-on high
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: ./reports
+```
+
+Only `FAIL` and `WARN` findings emit SARIF results — passing checks would flood the
+Security tab. `MANUAL` findings emit as `note` with `kind: "review"`.
+
+---
+
+## Development
+
+```bash
+.venv/bin/pytest              # tests
+.venv/bin/ruff check argus    # lint
+.venv/bin/mypy argus          # type check
+```
+
+Adding a check never requires editing the engine — subclass `Check`, declare a
+`CheckMeta`, and decorate with `@register`. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/architecture.md`](docs/architecture.md).
+
+## Documentation
+
+- [`docs/architecture.md`](docs/architecture.md) — pipeline and module layout
+- [`docs/benchmark.md`](docs/benchmark.md) — AASB structure, levels, numbering
+- [`docs/checks.md`](docs/checks.md) — every check with rationale and remediation
+- [`docs/scoring.md`](docs/scoring.md) — scoring algorithm
+- [`docs/threat-model.md`](docs/threat-model.md) — what Argus defends against, and its limits
+- [`SECURITY.md`](SECURITY.md) — reporting vulnerabilities in Argus itself
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
