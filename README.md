@@ -32,12 +32,82 @@ It is intended to be safe to point at a deliberately malicious configuration. Se
 
 ## Install
 
+Requires **Python 3.10+**. Runs on Linux, macOS and Windows with OS-aware path
+discovery.
+
+### Linux / macOS
+
 ```bash
+git clone https://github.com/vivashu27/Argus.git
+cd Argus
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
+
+.venv/bin/argus version
 ```
 
-Requires Python 3.10+. Runs on Linux, macOS and Windows with OS-aware path discovery.
+To call `argus` without the path prefix, activate the environment first:
+
+```bash
+source .venv/bin/activate
+argus version
+```
+
+### Windows
+
+Use the `py` launcher, and note that the executables live in `Scripts\`, not `bin/`.
+
+**PowerShell**
+
+```powershell
+git clone https://github.com/vivashu27/Argus.git
+cd Argus
+py -m venv .venv
+.venv\Scripts\pip install -e ".[dev]"
+
+.venv\Scripts\argus version
+```
+
+**Command Prompt (cmd.exe)**
+
+```bat
+git clone https://github.com/vivashu27/Argus.git
+cd Argus
+py -m venv .venv
+.venv\Scripts\pip install -e ".[dev]"
+
+.venv\Scripts\argus version
+```
+
+To activate the environment instead:
+
+```powershell
+.venv\Scripts\Activate.ps1     # PowerShell
+.venv\Scripts\activate.bat     # cmd.exe
+argus version
+```
+
+If PowerShell refuses to run the activation script, allow signed local scripts for
+your user only — this does not require an administrator:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+> **The examples below use the Linux/macOS form `.venv/bin/argus`.** On Windows,
+> substitute `.venv\Scripts\argus`, or activate the environment and just use `argus`.
+
+#### What differs on Windows
+
+- **Claude Desktop config** is read from `%APPDATA%\Claude\claude_desktop_config.json`;
+  Claude Code config from `%USERPROFILE%\.claude\`. Discovery resolves these
+  automatically — no configuration needed.
+- **`FS-005` and `FS-007` report `NOT_APPLICABLE`.** They evaluate POSIX permission
+  bits, which have no meaningful equivalent on NTFS. Argus says so explicitly rather
+  than passing them silently, so coverage stays honest. Review NTFS ACLs separately.
+- **Terminal output** uses UTF-8 block lettering in Windows Terminal and PowerShell 7.
+  On a legacy `cmd.exe` console that cannot encode it, the banner degrades to ASCII
+  automatically.
 
 ## Quick start
 
@@ -223,11 +293,23 @@ Security tab. `MANUAL` findings emit as `note` with `kind: "review"`.
 
 ## Development
 
+Linux / macOS:
+
 ```bash
 .venv/bin/pytest              # tests
 .venv/bin/ruff check argus    # lint
 .venv/bin/mypy argus          # type check
 ```
+
+Windows:
+
+```powershell
+.venv\Scripts\pytest              # tests
+.venv\Scripts\ruff check argus    # lint
+.venv\Scripts\mypy argus          # type check
+```
+
+All three must pass before a change is merged.
 
 Adding a check never requires editing the engine — subclass `Check`, declare a
 `CheckMeta`, and decorate with `@register`. See

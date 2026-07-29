@@ -2,6 +2,8 @@
 
 ## Setup
 
+Linux / macOS:
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
@@ -11,7 +13,24 @@ python3 -m venv .venv
 .venv/bin/mypy argus
 ```
 
+Windows (PowerShell or cmd.exe — note `Scripts\`, not `bin/`):
+
+```powershell
+py -m venv .venv
+.venv\Scripts\pip install -e ".[dev]"
+
+.venv\Scripts\pytest
+.venv\Scripts\ruff check argus tests
+.venv\Scripts\mypy argus
+```
+
 All three must pass before a change is merged.
+
+**Five tests are skipped on Windows by design.** `FS-005` and `FS-007` evaluate POSIX
+permission bits, so their tests carry `@pytest.mark.skipif(not is_posix())`, as does a
+`safe_io` permission test. If you develop on Windows, run the suite on Linux or in WSL
+before submitting a change that touches `argus/checks/filesystem_checks.py` or
+`argus/core/safe_io.py` — a green run on Windows alone does not cover them.
 
 ## The two rules that matter most
 
