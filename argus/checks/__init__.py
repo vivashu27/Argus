@@ -10,6 +10,7 @@ from . import (  # noqa: F401  (imported for registration side effects)
     filesystem_checks,
     hook_checks,
     instruction_checks,
+    llm_checks,
     mcp_checks,
     plugin_checks,
     secret_checks,
@@ -23,6 +24,7 @@ __all__ = [
     "plugin_checks",
     "hook_checks",
     "instruction_checks",
+    "llm_checks",
     "secret_checks",
     "filesystem_checks",
 ]

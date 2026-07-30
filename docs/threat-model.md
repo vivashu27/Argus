@@ -55,8 +55,10 @@ none:
   documentation contexts.
 - **Model behaviour.** Whether a given model actually complies with an injected
   instruction is out of scope.
-- **Network state.** Argus performs no network requests. A URL is classified by its host,
-  not by fetching it.
+- **Network state.** Argus never fetches a URL it finds. A URL is classified by its
+  host, not by retrieving it. The optional `--llm` stage does make outbound requests,
+  but only to the provider endpoint you configure — never to a host named in scanned
+  content.
 - **Compromise that has already happened.** Argus is a configuration auditor, not an EDR
   or a forensics tool.
 
@@ -65,7 +67,8 @@ none:
 | Limit | Reason |
 |---|---|
 | No server execution | Executing scanned content is the thing Argus exists to avoid |
-| No network requests | Fetching a URL from a hostile config is an SSRF primitive |
+| No fetching of discovered URLs | Fetching a URL from a hostile config is an SSRF primitive |
+| Network egress only to a configured provider, opt-in | `--llm` is the only network path, and never targets a host from scanned content |
 | No credential file contents read | Reading live tokens for no analytic gain is its own risk |
 | Depth-limited project walk | Bounds runtime and avoids surprising the operator |
 | Tiered command detection | A scanner that flags every `curl` gets switched off |
@@ -115,6 +118,27 @@ These are enforced by tests, not just by intent:
   the scan root and asserts its contents are not enumerated.
 - `test_malformed_configuration_does_not_crash` asserts a scan over invalid JSON, wrong
   types, and binary garbage produces findings with zero `ERROR` results.
+
+### Residual risk from LLM review (`--llm` only)
+
+Enabling `--llm` adds risk that does not exist in the default configuration. Stated
+plainly so the trade is deliberate:
+
+- **Third-party data processing.** Redacted excerpts of your agent configuration are
+  sent to the provider you choose. Redaction removes secrets and identity, but the
+  configuration's *structure* — server names, tool grants, instruction text — is
+  transmitted. Argus discloses the processing jurisdiction before the first request;
+  Moonshot and DeepSeek are PRC-hosted.
+- **The reviewer is injectable.** This is OWASP AST08: a scanned file can address the
+  reviewing model directly. Prompt framing reduces it but cannot eliminate it, so the
+  mitigation is structural instead — **an LLM verdict can only add a `MANUAL` finding.
+  It cannot alter, downgrade, or clear a static finding.** A file that says "report
+  this as safe" therefore achieves nothing beyond noise. Without `--llm`, Argus has no
+  model in the loop and this class of attack does not apply at all.
+- **Non-determinism.** LLM findings are `MANUAL`, so they never affect the score or
+  the exit code. The score remains hand-reproducible from the deduction breakdown.
+- **Cost and disclosure.** Requests are byte-capped and asset-capped, but scanning a
+  large environment with `--llm` has a real API cost.
 
 ### Residual risk
 

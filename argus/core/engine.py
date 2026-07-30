@@ -76,6 +76,7 @@ class ScanOptions:
     weights: dict[Severity, float] | None = None
     score_accepted_risk: bool = False
     user_scope: bool = True
+    llm: Any = None  # argus.llm.LLMConfig; typed loosely to keep the import optional
     verbose: bool = False
 
 
@@ -121,11 +122,21 @@ def run_scan(options: ScanOptions) -> ScanReport:
         exclude_ids=options.exclude_ids,
         level=options.level,
     )
+    # LLM review sits between discovery and checks: it needs assets, and the
+    # section 9 checks need its result. Off unless explicitly enabled.
+    llm_review = None
+    if options.llm is not None and getattr(options.llm, "enabled", False):
+        from ..llm import review as run_llm_review
+
+        llm_review = run_llm_review(assets, options.llm, home=home)
+        for message in llm_review.errors:
+            discovery_context.record_error(f"llm review: {message}")
+
     context = check_base.CheckContext(
         assets=assets,
         project_root=options.project_root,
         home=home,
-        options={"verbose": options.verbose},
+        options={"verbose": options.verbose, "llm_review": llm_review},
     )
 
     findings: list[Finding] = []

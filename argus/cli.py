@@ -130,6 +130,9 @@ def scan(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show all evidence, coverage, and score derivation."),
     exit_zero: bool = typer.Option(False, "--exit-zero", help="Always exit 0 when the scan itself completes."),
     no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Scan only --path; skip user-level locations (~/.claude, Claude Desktop)."),
+    llm: bool = typer.Option(False, "--llm", help="Enable LLM-assisted review (section 9). Sends REDACTED excerpts to a third-party API. Off by default."),
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="openai | anthropic | moonshot | deepseek."),
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Override the provider default model."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
 ) -> None:
     """Discover and audit AI-agent configuration in this environment."""
@@ -181,6 +184,33 @@ def scan(
         _fail("multiple output formats require --output DIR")
 
     # --- run ------------------------------------------------------------------
+    llm_settings = config.llm
+    if llm:
+        llm_settings.enabled = True
+    if llm_provider:
+        llm_settings.provider = llm_provider.strip().lower()
+    if llm_model:
+        llm_settings.model = llm_model
+
+    llm_config = None
+    if llm_settings.enabled:
+        from .llm import LLMConfig
+        from .llm.reviewer import PASSES
+
+        selected_passes = tuple(llm_settings.passes) or tuple(PASSES)
+        unknown = [p for p in selected_passes if p not in PASSES]
+        if unknown:
+            _fail(f"unknown llm pass(es): {', '.join(unknown)}. Choose from: {', '.join(PASSES)}")
+        llm_config = LLMConfig(
+            enabled=True,
+            provider=llm_settings.provider,
+            model=llm_settings.model,
+            timeout=llm_settings.timeout,
+            max_assets=llm_settings.max_assets,
+            max_bytes_per_asset=llm_settings.max_bytes_per_asset,
+            passes=selected_passes,
+        )
+
     options = ScanOptions(
         project_root=project_root,
         targets=targets,
@@ -192,6 +222,7 @@ def scan(
         weights=config.weights or None,
         score_accepted_risk=config.score_accepted_risk,
         user_scope=not no_user_scope,
+        llm=llm_config,
         verbose=verbose,
     )
 

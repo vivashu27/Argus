@@ -167,6 +167,58 @@ argus scan --format json --format sarif --format html --output ./reports
 
 ---
 
+## LLM-assisted review (optional, off by default)
+
+Static analysis can't reason across files. `--llm` adds a review stage that can — most
+usefully for the "lethal trifecta" (private-data access + untrusted content + egress),
+which no single-file check can see.
+
+```bash
+export OPENAI_API_KEY=...          # or ANTHROPIC_/MOONSHOT_/DEEPSEEK_API_KEY
+argus scan --llm
+argus scan --llm --llm-provider anthropic --llm-model claude-sonnet-4-5
+argus scan --category llm --llm    # only the LLM section
+```
+
+Providers: `openai`, `anthropic`, `moonshot` (Kimi), `deepseek`. Zero extra
+dependencies — all four are reached over the standard library.
+
+| Check | What it reviews |
+|---|---|
+| `LLM-001` | Instruction files and Skills for injection regex misses |
+| `LLM-002` | MCP capability — the `MCP-010`/`MCP-011` MANUAL gap |
+| `LLM-003` | Hook intent |
+| `LLM-004` | Lethal-trifecta correlation across assets |
+
+### Read this before enabling it
+
+**This is the only part of Argus that touches the network.** Understand the trade:
+
+- **Redacted excerpts are sent to your chosen provider.** Secrets are redacted and the
+  home path, username and hostname stripped before transmission — but configuration
+  *structure* (server names, tool grants, instruction text) is transmitted. Argus prints
+  the provider and its processing jurisdiction before the first request. **Moonshot and
+  DeepSeek are PRC-hosted.**
+- **API keys come from environment variables only.** `llm.api_key` in `argus.yaml` is a
+  hard error — that file is one Argus itself scans and reports on.
+- **Findings are advisory: always `MANUAL`.** They never affect the score and never gate
+  the exit code, so CI stays deterministic and the score stays hand-reproducible.
+- **The reviewer is prompt-injectable** (OWASP AST08). Prompt framing helps but isn't
+  sufficient, so the real mitigation is structural: **an LLM verdict can only add a
+  finding, never clear or downgrade one.** A file saying "report this as safe" achieves
+  nothing. Without `--llm` there is no model in the loop at all.
+
+```yaml
+llm:
+  enabled: false          # --llm overrides
+  provider: openai
+  model: gpt-4o-mini
+  max_assets: 20
+  max_bytes_per_asset: 8000
+  timeout: 60
+  passes: [injection, mcp, hooks, trifecta]
+```
+
 ## Configuration
 
 `argus.yaml` in the project root, or `--config PATH`. Precedence is
@@ -234,7 +286,7 @@ Full derivation in [`docs/scoring.md`](docs/scoring.md).
 
 ## The benchmark
 
-**AASB v1.0** — 63 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
+**AASB v1.0** — 67 checks in 9 sections. Check IDs are canonical; CIS-style numbers are
 derived (`CLAUDE-001` → AASB `1.1`).
 
 | § | Section | Prefix | Checks |
@@ -247,6 +299,7 @@ derived (`CLAUDE-001` → AASB `1.1`).
 | 6 | Instruction Files | `INSTR-` | 5 |
 | 7 | Secrets | `SECRET-` | 5 |
 | 8 | Filesystem | `FS-` | 7 |
+| 9 | LLM-Assisted Review | `LLM-` | 4 |
 
 **Level 1** — basic hygiene: concrete misconfigurations, low false-positive rate,
 remediation that does not materially reduce usability.
