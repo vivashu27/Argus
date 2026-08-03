@@ -19,8 +19,11 @@ htmlcov/
 # Scan output — contains hostnames, local file paths and findings about the
 # machine it ran on. Never commit these.
 reports/
+argus_output/
+argus-output/
 *.sarif
 argus-report-*
+Argus Security Report*
 
 # Local scanner configuration
 argus.yaml
