@@ -22,6 +22,33 @@ COMBINATORS = ("all", "any", "none")
 #: data; ``text`` searches the asset's raw text.
 SOURCES = ("field", "text")
 
+#: Fields each target's assets actually carry, taken from the discovery modules.
+#: Used to catch the most common way a rule goes wrong: a valid schema pointed at a
+#: field the target does not have, which validates cleanly and then never matches.
+TARGET_FIELDS: dict[Target, frozenset[str]] = {
+    Target.MCP: frozenset({"name", "command", "args", "env", "url", "transport", "scope", "raw"}),
+    Target.SKILLS: frozenset(
+        {"name", "scope", "directory", "frontmatter", "allowed_tools", "body", "scripts"}
+    ),
+    Target.PLUGINS: frozenset(
+        {"name", "marketplace", "trust", "trust_reason", "directory", "manifest", "files",
+         "mcp", "has_hooks"}
+    ),
+    Target.HOOKS: frozenset(
+        {"event", "matcher", "command", "type", "timeout", "scope", "script_path", "script_text"}
+    ),
+    Target.CLAUDE_CODE: frozenset(
+        {"settings", "scope", "malformed", "projects", "install_method", "auto_updates", "kind"}
+    ),
+    Target.CLAUDE_DESKTOP: frozenset({"config", "preferences", "mcp_server_names", "malformed"}),
+    Target.INSTRUCTIONS: frozenset({"scope", "name", "lines"}),
+    Target.FILESYSTEM: frozenset(
+        {"kind", "mode", "readable", "is_symlink", "sensitive", "category", "description",
+         "private_keys", "escaping", "variables"}
+    ),
+    Target.IDE: frozenset({"editor", "extension_count", "extensions", "agent_extensions", "settings"}),
+}
+
 #: Rules are authored by humans and shared between machines, so a regex from a rule
 #: file is only as trustworthy as its author. Bounding its length is a cheap guard
 #: against a pathological pattern; input length is bounded separately at match time.
@@ -79,6 +106,23 @@ class Rule:
     def check_id(self) -> str:
         """Findings namespace custom rules so they cannot collide with AASB IDs."""
         return f"CUSTOM-{self.rule_id.upper()}"
+
+    def unknown_fields(self) -> list[str]:
+        """Fields this rule reads that its target does not provide.
+
+        Only the first path segment is checked, so dotted paths into a nested
+        structure (``settings.permissions.allow``) validate on ``settings``.
+        """
+        known = TARGET_FIELDS.get(self.target, frozenset())
+        if not known:
+            return []
+        return sorted(
+            {
+                c.path.split(".")[0]
+                for c in self.match.conditions
+                if c.source == "field" and c.path and c.path.split(".")[0] not in known
+            }
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

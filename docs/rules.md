@@ -87,6 +87,23 @@ domains entirely, which is how you get `--category custom` to return just your o
 Rules obey the same selection flags as built-in checks: `--category`, `--target`,
 `--check CUSTOM-<ID>` and `--exclude CUSTOM-<ID>`.
 
+### Fields must exist on the target
+
+`argus rule validate` warns when a rule reads a field its target does not provide,
+and a scan reports it too. This is the most common way a rule goes quietly wrong:
+the schema is valid, so nothing errors, and the rule simply never fires.
+
+```
+warn  my-rule   HIGH   target=hooks category=hooks
+      field(s) body do not exist on target 'hooks', so this rule can never match.
+      available: command, event, matcher, scope, script_path, script_text, timeout, type
+```
+
+Retargeting an existing rule is when this usually happens — a rule written against
+`skills` and later pointed at `hooks` keeps validating while silently matching
+nothing. Dotted paths are checked on their first segment, so
+`settings.permissions.allow` validates against `settings`.
+
 ## Match blocks
 
 Exactly one combinator per rule:

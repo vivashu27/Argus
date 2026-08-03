@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from ..core.models import Severity, Target
 from .loader import RuleError, parse_rule
-from .model import COMBINATORS, OPERATORS
+from .model import COMBINATORS, OPERATORS, TARGET_FIELDS
 from .providers import LLMError, build_provider
 
 SYSTEM = f"""\
@@ -45,13 +45,7 @@ A condition has exactly one of 'field' or 'text', and exactly one operator from:
 'text' searches the asset's raw text.
 
 Fields available per target:
-  mcp           name, command, args, env, url, transport, scope
-  skills        name, scope, directory, allowed_tools, body
-  plugins       name, marketplace, trust, directory, manifest
-  hooks         event, matcher, command, type, scope, script_text
-  claude-code   settings, scope
-  instructions  scope, name
-  filesystem    kind, mode, readable, category, description
+{chr(10).join(f"  {t.value:14} {', '.join(sorted(f))}" for t, f in TARGET_FIELDS.items())}
 
 Write the narrowest rule that expresses the request. Prefer a specific field over a
 text search. Do not invent fields that are not listed above.

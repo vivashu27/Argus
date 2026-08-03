@@ -306,3 +306,42 @@ class TestCategorisation:
         rule = self._rule(tmp_path, extra="category: secrets\n")
         findings = engine.run_rules([rule], [mcp("x", "srv", [])])
         assert findings[0].meta.category is Category.SECRETS
+
+
+class TestDeadRuleDetection:
+    """A rule reading a field its target does not have validates cleanly and then
+    never fires. Found when a working skills rule was retargeted at hooks: the
+    schema stayed valid, and the rule silently stopped matching anything."""
+
+    def _rule(self, tmp_path, target: str, field: str):
+        body = (f"id: dead-check\nname: n\nseverity: high\ntarget: {target}\n"
+                f"match:\n  all:\n   - field: {field}\n     contains: x\n")
+        rules, errors = load_rules([write(tmp_path, body)])
+        assert not errors, errors
+        return rules[0]
+
+    def test_field_valid_for_its_target(self, tmp_path):
+        assert self._rule(tmp_path, "skills", "body").unknown_fields() == []
+
+    def test_field_absent_from_target_is_reported(self, tmp_path):
+        assert self._rule(tmp_path, "hooks", "body").unknown_fields() == ["body"]
+
+    def test_dotted_path_validates_on_its_first_segment(self, tmp_path):
+        rule = self._rule(tmp_path, "claude-code", "settings.permissions.allow")
+        assert rule.unknown_fields() == []
+
+    def test_a_dead_rule_really_cannot_match(self, tmp_path):
+        """The warning is only worth having if it predicts real behaviour."""
+        rule = self._rule(tmp_path, "hooks", "body")
+        hook = Asset(
+            asset_id="hook:PreToolUse#1", target=Target.HOOKS,
+            data={"event": "PreToolUse", "command": "xxx", "matcher": "*"},
+            text="xxx", source="/t",
+        )
+        assert rule.unknown_fields()
+        assert not engine.evaluate_rule(rule, hook)[0]
+
+    def test_every_target_has_a_field_map(self):
+        from argus.rules.model import TARGET_FIELDS
+
+        assert set(TARGET_FIELDS) == set(Target), "a missing target silently skips the check"

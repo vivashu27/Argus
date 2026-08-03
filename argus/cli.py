@@ -475,19 +475,38 @@ def rule_validate(
 ) -> None:
     """Check that rule files parse and conform to the schema."""
     from .rules import load_rules
+    from .rules.model import TARGET_FIELDS
 
     loaded, errors = load_rules(list(paths))
+    dead = 0
     for rule in loaded:
+        unknown = rule.unknown_fields()
         console.print(
-            Text.assemble(("  ok  ", "green"), (f"{rule.rule_id:<40} ", "bold"),
-                          (f"{rule.severity.value:<8} ", "dim"),
-                          (f"target={rule.target.value} ", "cyan"),
-                          (f"category={rule.category.value}", "magenta"))
+            Text.assemble(
+                ("  warn" if unknown else "  ok  ", "yellow" if unknown else "green"),
+                (f"  {rule.rule_id:<40} ", "bold"),
+                (f"{rule.severity.value:<8} ", "dim"),
+                (f"target={rule.target.value} ", "cyan"),
+                (f"category={rule.category.value}", "magenta"),
+            )
         )
+        if unknown:
+            dead += 1
+            available = ", ".join(sorted(TARGET_FIELDS.get(rule.target, frozenset())))
+            console.print(
+                Text(
+                    f"        field(s) {', '.join(unknown)} do not exist on target "
+                    f"'{rule.target.value}', so this rule can never match.\n"
+                    f"        available: {available}",
+                    style="yellow",
+                )
+            )
     for message in errors:
         err_console.print(Text(f"  error {message}", style="red"))
 
-    console.print(Text(f"\n  {len(loaded)} valid, {len(errors)} invalid.", style="dim"))
+    summary = f"\n  {len(loaded)} valid, {len(errors)} invalid"
+    summary += f", {dead} that cannot match." if dead else "."
+    console.print(Text(summary, style="dim"))
     raise typer.Exit(EXIT_USAGE_ERROR if errors else EXIT_OK)
 
 

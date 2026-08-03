@@ -163,6 +163,16 @@ def run_scan(options: ScanOptions) -> ScanReport:
         for message in rule_errors:
             discovery_context.record_error(f"rule: {message}")
 
+        # A rule reading a field its target does not have validates cleanly and then
+        # never fires. Silent dead coverage is exactly what this report exists for.
+        for rule in rules:
+            unknown = rule.unknown_fields()
+            if unknown:
+                discovery_context.record_error(
+                    f"rule '{rule.rule_id}' reads field(s) {', '.join(unknown)} which do "
+                    f"not exist on target '{rule.target.value}' — it can never match"
+                )
+
         # Rules are checks, so the same selection flags apply to them. Without this
         # a --category or --exclude filter silently ran every rule anyway.
         include = {i.strip().upper() for i in options.include_ids} if options.include_ids else None

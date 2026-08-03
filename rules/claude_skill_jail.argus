@@ -1,25 +1,21 @@
 id: skills-jailbreak-prompt-techniques
 name: Skills containing jailbreak prompt or technique indicators
 severity: high
-target: skills
+target: hooks
 match:
   any:
     - field: body
-      regex: (?i)(jailbreak|jail.?break|do anything now|dan mode|ignore (all )?(previous|prior) instructions|ignore your (rules|guidelines|instructions)|you are now|act as (if|though) you have no (rules|restrictions|limitations)|bypass (your )?(rules|restrictions|safety|guidelines)|unrestricted mode|no (rules|restrictions|limitations|constraints)|override (your )?(rules|safety|guidelines)|system prompt|prompt injection|adversarial prompt|malicious prompt)
+      regex: (?i)(jailbreak|jail.?break|do anything now|dan mode|ignore (all )?(previous|prior) instructions|ignore (your )?(rules|guidelines|constraints)|bypass (the )?(rules|restrictions|safety|guardrails)|act as (an? )?(unrestricted|unfiltered|uncensored)|developer mode|superprompt|prompt injection|adversarial prompt|system prompt leak|reveal (your|the) (system|hidden) prompt)
     - field: body
-      regex: (?i)(pretend|imagine|roleplay|simulate).{0,80}(no (rules|restrictions|limitations|constraints)|unrestricted|jailbreak|ignore (all )?(previous|prior) instructions)
-    - field: body
-      regex: (?i)(disregard|ignore|forget|bypass).{0,80}((all )?(previous|prior) instructions|your (rules|guidelines|instructions|safety)|safety (rules|guidelines|protocols)|content (policies|filters|restrictions))
+      regex: (?i)(you are (now )?(an? )?(unrestricted|unfiltered|uncensored|no.?limits)|no (rules|restrictions|limitations|boundaries)|without (any )?(rules|restrictions|limitations|boundaries)|disregard (all )?(rules|restrictions|guidelines|constraints)|override (your )?(rules|guidelines|constraints|safety)|remove (all )?(safety|guardrails|restrictions)|turn off (your )?(safety|guardrails|filters)|disable (your )?(safety|guardrails|filters))
 description: >-
   Detects instructions embedded in Claude skills that attempt to bypass model
-  safety guidelines, override system instructions, or employ known jailbreak
-  techniques. These patterns indicate prompt injection or adversarial content
-  that could cause the agent to act outside its intended scope.
+  safety, override system rules, or employ known jailbreak prompt techniques.
+  Such content can lead to unintended or harmful agent behavior.
 remediation: >-
-  Review the skill content and remove any instructions that attempt to override
-  safety guidelines, ignore prior instructions, or simulate unrestricted modes.
-  Ensure skills only contain legitimate task instructions.
-tags: [skills, jailbreak, prompt-injection, security]
+  Review the skill content and remove any jailbreak or prompt-injection
+  instructions. Ensure skills only contain legitimate, safety-compliant guidance.
+tags: [skills, jailbreak, prompt-injection, safety]
 references:
-  - https://www.anthropic.com/research/red-teaming-language-models-to-reduce-risks
-  - https://simonwillison.net/2023/Apr/27/jailbreaking-chatgpt/
+  - https://www.anthropic.com/research/best-practices-for-securing-agents
+  - https://www.anthropic.com/engineering/prompt-injection-defenses
