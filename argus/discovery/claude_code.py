@@ -31,6 +31,7 @@ def _load_settings(path: Path, scope: str, context: DiscoveryContext) -> Asset |
             path=path,
             data={"settings": {}, "scope": scope, "malformed": True},
             text=raw,
+            text_is_verbatim=True,
             source=str(path),
         )
     if not isinstance(data, dict):
@@ -45,6 +46,7 @@ def _load_settings(path: Path, scope: str, context: DiscoveryContext) -> Asset |
         path=path,
         data={"settings": data, "scope": scope, "malformed": False},
         text=raw,
+        text_is_verbatim=True,
         source=str(path),
     )
 
@@ -116,6 +118,7 @@ def discover(context: DiscoveryContext) -> list[Asset]:
                     path=path,
                     data={"kind": "agent"},
                     text=text,
+                    text_is_verbatim=True,
                     source=str(path),
                 )
             )

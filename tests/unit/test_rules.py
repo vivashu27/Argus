@@ -345,3 +345,84 @@ class TestDeadRuleDetection:
         from argus.rules.model import TARGET_FIELDS
 
         assert set(TARGET_FIELDS) == set(Target), "a missing target silently skips the check"
+
+
+class TestEvidenceLocation:
+    """A rule finding must point at the line it matched, or at no line at all."""
+
+    FILE = "---\nname: s\n---\n\nline five\nline six\nBADWORD here\nline eight\n"
+
+    def _skill(self, **over) -> Asset:
+        body = self.FILE.split("---\n", 2)[2]
+        data = {"name": "s", "body": body, "scope": "project", "allowed_tools": []}
+        return Asset(
+            asset_id="skill:s", target=Target.SKILLS, path=Path("/t/SKILL.md"),
+            data=data, text=self.FILE, source="/t/SKILL.md",
+            text_is_verbatim=over.pop("verbatim", True), **over,
+        )
+
+    def _rule(self, tmp_path, operator="regex", value="BADWORD", target="skills",
+              fld="body") -> object:
+        rules, errors = load_rules([write(tmp_path, (
+            f"id: loc-test\nname: n\nseverity: high\ntarget: {target}\n"
+            f"match:\n  all:\n    - field: {fld}\n      {operator}: '{value}'\n"
+        ))])
+        assert not errors, errors
+        return rules[0]
+
+    def test_regex_match_reports_the_real_file_line(self, tmp_path):
+        _matched, evidence = engine.evaluate_rule(self._rule(tmp_path), self._skill())
+        assert evidence[0].line == 7
+        assert self.FILE.splitlines()[6] == "BADWORD here"
+
+    def test_contains_match_reports_the_line(self, tmp_path):
+        rule = self._rule(tmp_path, operator="contains", value="BADWORD")
+        assert engine.evaluate_rule(rule, self._skill())[1][0].line == 7
+
+    def test_line_accounts_for_frontmatter_offset(self, tmp_path):
+        """The rule reads 'body', which starts after the frontmatter; a line counted
+        within the body alone would be wrong by that offset."""
+        rule = self._rule(tmp_path)
+        line = engine.evaluate_rule(rule, self._skill())[1][0].line
+        assert line != 3, "line was counted within the body instead of the file"
+
+    def test_synthesised_text_reports_no_line(self, tmp_path):
+        """An MCP asset's text is re-serialised JSON, so an offset into it points at
+        nothing the reader can open. No line beats a plausible wrong one."""
+        rule = self._rule(tmp_path, operator="contains", value="npx",
+                          target="mcp", fld="command")
+        server = mcp("fs", "npx", ["-y", "pkg"])
+        assert server.text_is_verbatim is False
+        matched, evidence = engine.evaluate_rule(rule, server)
+        assert matched and evidence[0].line is None
+
+    def test_snippet_is_centred_on_the_match_not_the_head(self, tmp_path):
+        """A match deep in a large body must not be evidenced by its first 160 chars."""
+        padded = "filler line\n" * 400 + "BADWORD here\n"
+        asset = Asset(
+            asset_id="skill:s", target=Target.SKILLS, path=Path("/t/SKILL.md"),
+            data={"name": "s", "body": padded}, text=padded, source="/t",
+            text_is_verbatim=True,
+        )
+        evidence = engine.evaluate_rule(self._rule(tmp_path), asset)[1][0]
+        assert "BADWORD" in evidence.snippet
+        assert evidence.line == 401
+
+    def test_snippet_stays_on_one_line(self, tmp_path):
+        """Evidence is rendered inline in six formats; an embedded newline breaks them."""
+        evidence = engine.evaluate_rule(self._rule(tmp_path), self._skill())[1][0]
+        assert "\n" not in evidence.snippet
+
+    def test_negative_operator_points_at_the_field_it_read(self, tmp_path):
+        """not_contains matches by absence, so there is no match to point at — but
+        the field itself has a real position, and 'this field, here, lacks X' is
+        honest evidence. Line 4 is where the body begins."""
+        rule = self._rule(tmp_path, operator="not_contains", value="ABSENT")
+        matched, evidence = engine.evaluate_rule(rule, self._skill())
+        assert matched and evidence[0].line == 4
+
+    def test_matching_element_of_a_list_is_the_one_evidenced(self, tmp_path):
+        rule = self._rule(tmp_path, operator="contains", value="npx",
+                          target="mcp", fld="args")
+        server = mcp("fs", "node", ["--quiet", "npx-shim", "other"])
+        assert engine.evaluate_rule(rule, server)[1][0].snippet == "npx-shim"

@@ -183,6 +183,13 @@ class Asset:
     source: str = ""
     is_fixture: bool = False
 
+    #: ``text`` is the file at ``path`` byte for byte, so an offset into it is a real
+    #: offset into that file. False where ``text`` is synthesised for the analyzers —
+    #: a re-serialised JSON config, or a hook's command joined to its script — because
+    #: a line number derived from a reconstruction would not point at anything the
+    #: reader can open. Defaults to False so a new discoverer has to opt in.
+    text_is_verbatim: bool = False
+
     @property
     def label(self) -> str:
         return self.asset_id if self.path is None else f"{self.asset_id} ({self.path})"

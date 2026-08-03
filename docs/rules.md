@@ -151,6 +151,25 @@ A rule that matches nothing across applicable assets reports `PASS`. A rule whos
 target produced no assets reports `NOT_APPLICABLE` with the reason. A rule that
 raises reports `ERROR` for that asset and the scan continues.
 
+### Line numbers in evidence
+
+Evidence reports the line the rule matched on, in every format — `SKILL.md:10` in the
+terminal and Markdown, `line` in JSON/YAML/CSV, and `region.startLine` in SARIF, so
+GitHub Security annotates the right line. The snippet is a window centred on the match
+rather than the head of the field, which matters once a rule fires deep in a long file.
+
+A line is reported only where it is real. For Skills, instruction files and Claude
+config, the scanned text is the file byte for byte, so an offset into it is an offset
+into the file — including the frontmatter, so a `field: body` match still reports its
+true line in `SKILL.md`. For **MCP servers, plugins and hooks** the scanned text is
+synthesised: an MCP asset is re-serialised JSON, and a hook is its command joined to
+its resolved script. An offset into a reconstruction points at nothing you can open —
+your real `.mcp.json` may be minified onto one line — so those findings report no line
+rather than a plausible wrong one. The `path` is always present.
+
+Negative operators (`not_contains`, `not_regex`) match by absence, so there is no
+match to point at; they report where the field itself begins.
+
 ## Running rules
 
 ```bash

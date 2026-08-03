@@ -41,6 +41,7 @@ def discover(context: DiscoveryContext) -> list[Asset]:
                 path=config_path,
                 data={"config": {}, "malformed": True},
                 text=raw,
+                text_is_verbatim=True,
                 source=str(config_path),
             )
         )
@@ -61,6 +62,7 @@ def discover(context: DiscoveryContext) -> list[Asset]:
                 "malformed": False,
             },
             text=raw,
+            text_is_verbatim=True,
             source=str(config_path),
         )
     )

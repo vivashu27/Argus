@@ -99,6 +99,7 @@ def _discover_dir(root: Path, scope: str, context: DiscoveryContext) -> list[Ass
                     "scripts": scripts,
                 },
                 text=text,
+                text_is_verbatim=True,
                 source=str(skill_file),
             )
         )

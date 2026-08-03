@@ -42,6 +42,7 @@ def discover(context: DiscoveryContext) -> list[Asset]:
                 path=path,
                 data={"scope": scope, "name": path.name, "lines": text.count("\n") + 1},
                 text=text,
+                text_is_verbatim=True,
                 source=str(path),
             )
         )

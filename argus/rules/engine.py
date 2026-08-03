@@ -68,6 +68,66 @@ def _values_for(asset: Asset, condition: Condition) -> list[str]:
     return [v[:MAX_MATCH_INPUT] for v in _lookup(asset, condition.path or "")]
 
 
+#: Characters of context to show either side of the matched text.
+SNIPPET_CONTEXT = 70
+
+
+def _match_span(condition: Condition, value: str) -> tuple[int, int] | None:
+    """Where inside ``value`` the condition matched, when that is a real span.
+
+    Negative and presence operators match by the *absence* of something, so there is
+    no span to point at and this returns None.
+    """
+    if condition.operator == "regex":
+        found = condition._compiled.search(value)  # type: ignore[union-attr]
+        return found.span() if found else None
+    if condition.operator in ("contains", "equals"):
+        haystack, needle = value, condition.value
+        if condition.ignore_case:
+            haystack, needle = haystack.lower(), needle.lower()
+        start = haystack.find(needle)
+        return (start, start + len(needle)) if start >= 0 else None
+    return None
+
+
+def _locate(asset: Asset, value: str, span: tuple[int, int] | None) -> int | None:
+    """The 1-based line in ``asset.path`` where the match sits, if that is knowable.
+
+    With no span — a negative operator matches by absence, so there is nothing to
+    point at — this falls back to where the field itself begins, which is still a
+    real position and still tells the reader what was read.
+
+    Requires the asset's text to be the file byte for byte. Where it is synthesised
+    for the analyzers — a re-serialised MCP config, a hook's command joined to its
+    script — an offset into it points at nothing the reader can open, so no line is
+    reported rather than a plausible wrong one.
+    """
+    if not asset.text_is_verbatim or not asset.text:
+        return None
+    base = asset.text.find(value)
+    if base < 0:
+        # A derived value (a dict rendered ``k=v``, a normalised list element) need
+        # not appear in the file at all.
+        return None
+    return asset.text.count("\n", 0, base + (span[0] if span else 0)) + 1
+
+
+def _snippet(value: str, span: tuple[int, int] | None) -> str:
+    """The matched text with surrounding context, rather than the head of the field.
+
+    A rule matching at line 400 of a Skill was previously evidenced by the first 160
+    characters of its body, which showed the reader nothing about why it fired.
+    """
+    if span is None:
+        return truncate(value, 160)
+    start = max(0, span[0] - SNIPPET_CONTEXT)
+    end = min(len(value), span[1] + SNIPPET_CONTEXT)
+    # truncate() also collapses whitespace, which keeps a snippet on one line and
+    # bounds what a hostile file can push into a report.
+    window = truncate(value[start:end], 160)
+    return ("…" if start > 0 else "") + window + ("…" if end < len(value) else "")
+
+
 def _test(condition: Condition, values: list[str]) -> bool:
     """Evaluate one condition. Negative operators are handled by the caller's
     combinator only for presence; the negation itself is applied here."""
@@ -109,11 +169,22 @@ def evaluate_rule(rule: Rule, asset: Asset) -> tuple[bool, list[Evidence]]:
         matched = _test(condition, values)
         results.append(matched)
         if matched and values:
+            # Point at the value that actually matched, not simply the first one:
+            # a rule on a list field should evidence the element that fired.
+            hit, span = next(
+                (
+                    (v, s)
+                    for v in values
+                    if (s := _match_span(condition, v)) is not None
+                ),
+                (values[0], None),
+            )
             evidence.append(
                 Evidence(
                     path=str(asset.path) if asset.path else asset.source,
+                    line=_locate(asset, hit, span),
                     key=condition.path if condition.source == "field" else "text",
-                    snippet=truncate(values[0], 160),
+                    snippet=_snippet(hit, span),
                     reason=f"matched: {condition.describe()}",
                 )
             )
