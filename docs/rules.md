@@ -21,6 +21,7 @@ id: mcp-unpinned-npx                 # required, 2-64 chars: a-z 0-9 . _ -
 name: MCP server launched via npx with no version pin   # required
 severity: high                       # required: critical | high | medium | low | info
 target: mcp                          # required, see targets below
+category: mcp                        # optional, defaults to the target's category
 match:                               # required
   all:
     - field: command
@@ -57,6 +58,34 @@ that asset's parsed data.
 Every target also supports `text`, which searches the asset's raw text rather than a
 named field. Prefer a specific field where one exists — it is faster and far less
 prone to matching something incidental.
+
+## Categories
+
+`target` decides which assets a rule *sees*. `category` decides where its findings are
+*filed*, and therefore what `--category` matches. They are separate on purpose: a rule
+with `target: skills` might be looking for secrets, not a Skills-hygiene problem.
+
+If you omit `category`, it defaults to the category matching the target, so a
+`target: skills` rule appears under `--category skills` alongside the built-in `SKILL-*`
+checks. That is usually what you want and needs no extra field.
+
+| Target | Default category |
+|---|---|
+| `skills` | `skills` |
+| `mcp` | `mcp` |
+| `hooks` | `hooks` |
+| `plugins` | `plugins` |
+| `instructions` | `instructions` |
+| `filesystem` | `filesystem` |
+| `claude-code`, `claude-desktop` | `claude` |
+| `ide` | `custom` (no IDE category exists) |
+
+Set it explicitly to override — `category: secrets` on a Skills rule files it with the
+other secret findings — or `category: custom` to keep your rules out of the built-in
+domains entirely, which is how you get `--category custom` to return just your own.
+
+Rules obey the same selection flags as built-in checks: `--category`, `--target`,
+`--check CUSTOM-<ID>` and `--exclude CUSTOM-<ID>`.
 
 ## Match blocks
 
@@ -96,9 +125,9 @@ Rules are deterministic, so their findings are real ones: they carry evidence, c
 toward the score, and gate the exit code exactly like a built-in check. That is the
 difference between a rule and an advisory signal, and the reason to write one.
 
-Findings appear under check ID `CUSTOM-<RULE-ID>` in the `custom` category, so
-`--category custom` filters to just your rules. They report `custom` rather than an
-AASB number because they are not benchmark items — a fabricated number would imply a
+Findings appear under check ID `CUSTOM-<RULE-ID>`, filed in whichever category the
+rule declares (see above). In place of an AASB number they report their category
+slug, because they are not benchmark items and a fabricated number would imply a
 standing the rule does not have.
 
 A rule that matches nothing across applicable assets reports `PASS`. A rule whose

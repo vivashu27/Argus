@@ -480,7 +480,9 @@ def rule_validate(
     for rule in loaded:
         console.print(
             Text.assemble(("  ok  ", "green"), (f"{rule.rule_id:<40} ", "bold"),
-                          (f"{rule.severity.value:<8} ", "dim"), (rule.target.value, "cyan"))
+                          (f"{rule.severity.value:<8} ", "dim"),
+                          (f"target={rule.target.value} ", "cyan"),
+                          (f"category={rule.category.value}", "magenta"))
         )
     for message in errors:
         err_console.print(Text(f"  error {message}", style="red"))

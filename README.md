@@ -210,8 +210,14 @@ matches, so `field: args` works on an argument vector.
 
 Unlike the benchmark checks, rules are yours — but they behave identically once
 loaded. Rule findings are deterministic, so they **count toward the score and gate
-the exit code** like any built-in check, and they land in their own `custom`
-category so `--category custom` filters to just them.
+the exit code** like any built-in check, and they obey the same selection flags:
+`--category`, `--target`, `--check CUSTOM-<ID>` and `--exclude CUSTOM-<ID>`.
+
+An optional `category:` field decides where findings are filed. It defaults to the
+category matching the `target`, so a `target: skills` rule shows up under
+`--category skills` next to the built-in `SKILL-*` checks with no extra work. Set it
+explicitly to file elsewhere (`category: secrets`), or use `category: custom` to keep
+your rules out of the built-in domains so `--category custom` returns only yours.
 
 Validation is strict and unknown keys are rejected, because `severty: high` would
 otherwise leave a rule quietly at its default severity forever. One malformed rule is

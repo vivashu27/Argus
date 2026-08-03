@@ -162,7 +162,20 @@ def run_scan(options: ScanOptions) -> ScanReport:
         rules, rule_errors = load_rules(options.rule_paths)
         for message in rule_errors:
             discovery_context.record_error(f"rule: {message}")
-        findings.extend(run_rules(rules, assets))
+
+        # Rules are checks, so the same selection flags apply to them. Without this
+        # a --category or --exclude filter silently ran every rule anyway.
+        include = {i.strip().upper() for i in options.include_ids} if options.include_ids else None
+        exclude = {e.strip().upper() for e in options.exclude_ids} if options.exclude_ids else set()
+        selected_rules = [
+            r
+            for r in rules
+            if (options.categories is None or r.category in options.categories)
+            and (options.targets is None or r.target in options.targets)
+            and (include is None or r.check_id in include)
+            and r.check_id not in exclude
+        ]
+        findings.extend(run_rules(selected_rules, assets))
 
     # 6-7. Normalization and risk classification
     expired = _apply_exceptions(findings, options.exceptions)

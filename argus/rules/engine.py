@@ -16,7 +16,6 @@ from typing import Any
 from ..analysis.redaction import truncate
 from ..core.models import (
     Asset,
-    Category,
     CheckMeta,
     Confidence,
     Evidence,
@@ -131,7 +130,7 @@ def _meta_for(rule: Rule) -> CheckMeta:
         check_id=rule.check_id,
         title=rule.name,
         description=rule.description or f"Custom rule '{rule.rule_id}'.",
-        category=Category.CUSTOM,
+        category=rule.category,
         severity=rule.severity,
         aasb_level=2,
         applies_to=frozenset({rule.target}),

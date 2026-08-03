@@ -186,7 +186,7 @@ class TestEvaluation:
         findings = engine.run_rules([rule], [mcp("bad", "npx", ["@x/srv"])])
         fails = [f for f in findings if f.status is Status.FAIL]
         assert fails
-        assert fails[0].meta.category is Category.CUSTOM
+        assert fails[0].meta.category is Category.MCP, "filed under its target's domain"
         assert score_findings(findings).score < 100
         assert gating_findings(findings, Severity.LOW)
 
@@ -200,10 +200,13 @@ class TestEvaluation:
         assert findings[0].status is Status.NOT_APPLICABLE
 
     def test_custom_rules_have_no_fabricated_aasb_number(self, tmp_path):
-        """Custom rules are not benchmark items; regression for an int() crash."""
+        """Rules are not benchmark items, so they report a category slug rather than
+        a number. Regression for an int() crash on slug-based check IDs."""
         rule = self._rule(tmp_path)
         findings = engine.run_rules([rule], [mcp("bad", "npx", ["@x/srv"])])
-        assert findings[0].meta.aasb == "custom"
+        aasb = findings[0].meta.aasb
+        assert aasb == "mcp"
+        assert not any(ch.isdigit() for ch in aasb), "must not look like a benchmark number"
 
 
 class TestGeneration:
@@ -258,3 +261,48 @@ class TestGeneration:
     def test_unknown_provider_rejected(self):
         with pytest.raises(LLMError, match="unknown provider"):
             generate_rule("x", provider="nope", api_key="k")
+
+
+class TestCategorisation:
+    """Rules file themselves by domain so --category picks them up alongside the
+    built-in checks. Regression: --category and --exclude silently ran every rule."""
+
+    def _rule(self, tmp_path, extra="", target="skills"):
+        body = (f"id: cat-test\nname: n\nseverity: high\ntarget: {target}\n{extra}"
+                "match:\n  all:\n   - field: name\n     exists: true\n")
+        rules, errors = load_rules([write(tmp_path, body)])
+        assert not errors, errors
+        return rules[0]
+
+    @pytest.mark.parametrize(
+        ("target", "expected"),
+        [("skills", Category.SKILLS), ("mcp", Category.MCP), ("hooks", Category.HOOKS),
+         ("plugins", Category.PLUGINS), ("instructions", Category.INSTRUCTIONS),
+         ("filesystem", Category.FILESYSTEM), ("claude-code", Category.CLAUDE),
+         ("claude-desktop", Category.CLAUDE)],
+    )
+    def test_category_defaults_from_target(self, tmp_path, target, expected):
+        assert self._rule(tmp_path, target=target).category is expected
+
+    def test_ide_target_falls_back_to_custom(self, tmp_path):
+        """No IDE category exists, so it must not invent one."""
+        assert self._rule(tmp_path, target="ide").category is Category.CUSTOM
+
+    def test_explicit_category_overrides_the_default(self, tmp_path):
+        rule = self._rule(tmp_path, extra="category: secrets\n")
+        assert rule.category is Category.SECRETS
+        assert rule.target is Target.SKILLS, "category must not change the target"
+
+    def test_explicit_custom_opts_out_of_domain_filing(self, tmp_path):
+        assert self._rule(tmp_path, extra="category: custom\n").category is Category.CUSTOM
+
+    def test_invalid_category_rejected(self, tmp_path):
+        body = ("id: cat-bad\nname: n\nseverity: high\ntarget: skills\ncategory: nope\n"
+                "match:\n  all:\n   - field: name\n     exists: true\n")
+        with pytest.raises(RuleError, match="unknown category"):
+            parse_rule(__import__("yaml").safe_load(body), "<t>")
+
+    def test_finding_carries_the_declared_category(self, tmp_path):
+        rule = self._rule(tmp_path, extra="category: secrets\n")
+        findings = engine.run_rules([rule], [mcp("x", "srv", [])])
+        assert findings[0].meta.category is Category.SECRETS

@@ -1,0 +1,18 @@
+# Demonstrates `category:` — a Skills-targeted rule filed under `secrets`,
+# so it appears with `--category secrets` rather than `--category skills`.
+id: skill-embedded-webhook
+name: Skill posts to a hardcoded webhook endpoint
+severity: high
+target: skills
+category: secrets
+
+match:
+  all:
+    - field: body
+      regex: 'https?://(webhook\.site|hooks\.slack\.com|discord(app)?\.com/api/webhooks)'
+
+description: >-
+  A hardcoded collector endpoint in a Skill body is an outbound channel that no
+  permission rule gates, because the Skill supplies the destination itself.
+remediation: Remove the endpoint, or route the call through a permission-gated tool.
+tags: [skills, exfiltration]

@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..core.models import Severity, Target
+from ..core.models import Category, Severity, Target
 
 #: Operators a condition may use. Exactly one per condition.
 OPERATORS = ("contains", "not_contains", "equals", "regex", "not_regex", "exists", "not_exists")
@@ -67,6 +67,7 @@ class Rule:
     name: str
     severity: Severity
     target: Target
+    category: Category
     match: RuleMatch
     description: str = ""
     remediation: str = ""
@@ -85,6 +86,7 @@ class Rule:
             "name": self.name,
             "severity": self.severity.value.lower(),
             "target": self.target.value,
+            "category": self.category.value,
             "description": self.description,
             "remediation": self.remediation,
             "tags": list(self.tags),

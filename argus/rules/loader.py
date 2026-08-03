@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 from ..core.exceptions import ArgusError
-from ..core.models import Severity, Target
+from ..core.models import Category, Severity, Target
 from ..core.safe_io import iter_files, read_yaml
 from .model import (
     COMBINATORS,
@@ -28,8 +28,23 @@ from .model import (
 RULE_SUFFIX = ".argus"
 
 TOP_LEVEL_KEYS = {
-    "id", "name", "severity", "target", "match",
+    "id", "name", "severity", "target", "category", "match",
     "description", "remediation", "references", "tags",
+}
+
+#: A rule filed under the category matching its target lands alongside the built-in
+#: checks for that domain, so ``--category skills`` picks up your Skill rules too.
+#: ``ide`` has no corresponding category, so it falls back to ``custom``.
+TARGET_CATEGORY: dict[Target, Category] = {
+    Target.CLAUDE_CODE: Category.CLAUDE,
+    Target.CLAUDE_DESKTOP: Category.CLAUDE,
+    Target.MCP: Category.MCP,
+    Target.SKILLS: Category.SKILLS,
+    Target.PLUGINS: Category.PLUGINS,
+    Target.HOOKS: Category.HOOKS,
+    Target.INSTRUCTIONS: Category.INSTRUCTIONS,
+    Target.FILESYSTEM: Category.FILESYSTEM,
+    Target.IDE: Category.CUSTOM,
 }
 REQUIRED_KEYS = {"id", "name", "severity", "target", "match"}
 CONDITION_KEYS = {"field", "text", "ignore_case", *OPERATORS}
@@ -140,6 +155,16 @@ def parse_rule(data: object, source_path: Path | str = "<inline>") -> Rule:
     except ValueError as exc:
         _fail(source_path, str(exc))
 
+    # Defaults to the category matching the target so a rule files itself sensibly;
+    # set 'category: custom' to keep it out of the built-in domains.
+    if data.get("category"):
+        try:
+            category = Category.parse(str(data["category"]))
+        except ValueError as exc:
+            _fail(source_path, str(exc))
+    else:
+        category = TARGET_CATEGORY.get(target, Category.CUSTOM)
+
     def string_list(key: str) -> tuple[str, ...]:
         raw = data.get(key) or []
         if isinstance(raw, str):
@@ -153,6 +178,7 @@ def parse_rule(data: object, source_path: Path | str = "<inline>") -> Rule:
         name=str(data["name"]).strip(),
         severity=severity,
         target=target,
+        category=category,
         match=_parse_match(data["match"], source_path),
         description=str(data.get("description") or "").strip(),
         remediation=str(data.get("remediation") or "").strip(),

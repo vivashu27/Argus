@@ -505,3 +505,45 @@ class TestUserScopeIsolation:
 
         outer = run_scan(ScanOptions(project_root=parent, home=home, user_scope=False))
         assert [a for a in outer.result.assets if a.target is Target.SKILLS]
+
+
+class TestRuleSelection:
+    """--category, --target, --check and --exclude must apply to rules too."""
+
+    def _env(self, tmp_path):
+        home, project = tmp_path / "home", tmp_path / "project"
+        (home / ".claude").mkdir(parents=True, exist_ok=True)
+        skill = project / ".claude" / "skills" / "s"
+        skill.mkdir(parents=True, exist_ok=True)
+        skill.joinpath("SKILL.md").write_text("---\nname: s\n---\n\nbody\n")
+        rules = tmp_path / "rules"
+        rules.mkdir(exist_ok=True)
+        (rules / "r.argus").write_text(
+            "id: sel-test\nname: n\nseverity: high\ntarget: skills\n"
+            "match:\n  all:\n   - field: name\n     exists: true\n"
+        )
+        return home, project, [rules]
+
+    def _ran(self, tmp_path, **kwargs) -> bool:
+        home, project, rules = self._env(tmp_path)
+        report = run_scan(
+            ScanOptions(project_root=project, home=home, user_scope=False,
+                        rule_paths=rules, **kwargs)
+        )
+        return any(f.check_id == "CUSTOM-SEL-TEST" for f in report.result.findings)
+
+    def test_matching_category_runs_the_rule(self, tmp_path):
+        assert self._ran(tmp_path, categories={Category.SKILLS})
+
+    def test_other_category_excludes_it(self, tmp_path):
+        assert not self._ran(tmp_path, categories={Category.MCP})
+
+    def test_matching_target_runs_it(self, tmp_path):
+        assert self._ran(tmp_path, targets={Target.SKILLS})
+
+    def test_exclude_by_check_id(self, tmp_path):
+        assert not self._ran(tmp_path, exclude_ids=["CUSTOM-SEL-TEST"])
+
+    def test_include_by_check_id(self, tmp_path):
+        assert self._ran(tmp_path, include_ids=["CUSTOM-SEL-TEST"])
+        assert not self._ran(tmp_path, include_ids=["MCP-003"])
