@@ -17,6 +17,9 @@ CLAUDE_EXTENSION_MARKERS = ("anthropic", "claude")
 
 def discover(context: DiscoveryContext) -> list[Asset]:
     assets: list[Asset] = []
+    # IDE discovery is user-scope inventory in its entirety.
+    if not context.user_scope:
+        return assets
 
     for directory in plat.ide_config_dirs(context.home):
         if not directory.is_dir():

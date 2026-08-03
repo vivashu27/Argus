@@ -46,9 +46,12 @@ def discover(context: DiscoveryContext) -> list[Asset]:
             )
         )
 
+    user_dir = str(plat.claude_user_dir(context.home))
     for path in plat.instruction_files(context.project_root, context.home):
-        scope = "user" if str(path).startswith(str(plat.claude_user_dir(context.home))) else "project"
-        add(path, scope)
+        is_user = str(path).startswith(user_dir)
+        if is_user and not context.user_scope:
+            continue
+        add(path, "user" if is_user else "project")
 
     # Nested instruction files inside the project, depth-limited.
     root = context.project_root

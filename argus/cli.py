@@ -479,8 +479,8 @@ def rule_validate(
     loaded, errors = load_rules(list(paths))
     for rule in loaded:
         console.print(
-            Text.assemble(("  ok    ", "green"), (f"{rule.rule_id:28}", "bold"),
-                          (f"{rule.severity.value:8} ", "dim"), (rule.target.value, "cyan"))
+            Text.assemble(("  ok  ", "green"), (f"{rule.rule_id:<40} ", "bold"),
+                          (f"{rule.severity.value:<8} ", "dim"), (rule.target.value, "cyan"))
         )
     for message in errors:
         err_console.print(Text(f"  error {message}", style="red"))

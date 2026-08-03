@@ -104,15 +104,24 @@ def run_scan(options: ScanOptions) -> ScanReport:
         options.project_root, options.targets, home=home, user_scope=options.user_scope
     )
 
-    # An explicitly requested target that yielded nothing is almost always a layout
-    # mistake (wrong --path, or skills not under .claude/skills). Saying so beats
-    # silently reporting on assets found somewhere else entirely.
+    # A requested target that yielded nothing is almost always a layout mistake —
+    # the wrong --path, or Skills that are not one directory below it. Saying so
+    # beats silently reporting on assets found somewhere else entirely.
     for target in options.targets or ():
         if not any(a.target is target for a in assets):
             discovery_context.record_error(
                 f"no '{target.value}' assets were found under {options.project_root}"
                 + ("" if options.user_scope else " (user scope disabled)")
             )
+
+    # Same failure, without --target: an isolated scan that found nothing at all is
+    # a mistake worth naming, not a clean bill of health.
+    if not options.user_scope and not assets:
+        discovery_context.record_error(
+            f"no agent assets were found under {options.project_root} with user scope "
+            "disabled. Check --path: Skills are discovered as <path>/<name>/SKILL.md, "
+            "so point at the directory that contains skill folders, not at one of them."
+        )
 
     # 4-5. Static analysis and security checks
     checks = select(

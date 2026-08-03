@@ -75,9 +75,9 @@ def _from_mapping(
 def discover(context: DiscoveryContext) -> list[Asset]:
     assets: list[Asset] = []
 
-    # 1. Claude Desktop configuration
+    # 1. Claude Desktop configuration (user scope)
     desktop_config = plat.claude_desktop_config(context.home)
-    if desktop_config.is_file() and is_readable(desktop_config):
+    if context.user_scope and desktop_config.is_file() and is_readable(desktop_config):
         data = read_json(desktop_config)
         if isinstance(data, dict):
             assets.extend(
@@ -94,9 +94,9 @@ def discover(context: DiscoveryContext) -> list[Asset]:
         else:
             context.record_unreadable(project_mcp, "permission denied")
 
-    # 3. Per-project blocks in ~/.claude.json
+    # 3. Per-project blocks in ~/.claude.json (user scope)
     global_state = plat.claude_json(context.home)
-    if global_state.is_file() and is_readable(global_state):
+    if context.user_scope and global_state.is_file() and is_readable(global_state):
         data = read_json(global_state)
         if isinstance(data, dict):
             projects = data.get("projects")
@@ -114,10 +114,10 @@ def discover(context: DiscoveryContext) -> list[Asset]:
                     )
 
     # 4. Claude Code settings files may also carry MCP definitions.
-    for settings_path in [
-        *plat.claude_settings_files(context.home),
-        *plat.project_settings_files(context.project_root),
-    ]:
+    settings_sources = list(plat.project_settings_files(context.project_root))
+    if context.user_scope:
+        settings_sources = [*plat.claude_settings_files(context.home), *settings_sources]
+    for settings_path in settings_sources:
         if settings_path.is_file() and is_readable(settings_path):
             data = read_json(settings_path)
             if isinstance(data, dict):

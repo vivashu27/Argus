@@ -111,10 +111,9 @@ def discover(context: DiscoveryContext) -> list[Asset]:
     home = context.home
     base_dirs = [context.project_root, plat.claude_user_dir(home), home]
 
-    settings_paths = [
-        *plat.claude_settings_files(home),
-        *plat.project_settings_files(context.project_root),
-    ]
+    settings_paths = list(plat.project_settings_files(context.project_root))
+    if context.user_scope:
+        settings_paths = [*plat.claude_settings_files(home), *settings_paths]
     for path in settings_paths:
         if not path.is_file():
             continue
@@ -126,9 +125,9 @@ def discover(context: DiscoveryContext) -> list[Asset]:
             scope = "user" if str(path).startswith(str(plat.claude_user_dir(home))) else "project"
             assets.extend(_extract(data.get("hooks"), path, scope, base_dirs))
 
-    # Plugin-shipped hooks
+    # Plugin-shipped hooks live under the user's plugin directory.
     plugins_root = plat.plugins_dir(home) / "marketplaces"
-    if plugins_root.is_dir():
+    if context.user_scope and plugins_root.is_dir():
         for hooks_file in plugins_root.glob("*/plugins/*/hooks/hooks.json"):
             if hooks_file.is_symlink() or not is_readable(hooks_file):
                 continue

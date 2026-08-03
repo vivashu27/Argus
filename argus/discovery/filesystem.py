@@ -28,11 +28,22 @@ def discover(context: DiscoveryContext) -> list[Asset]:
     home = context.home
 
     # --- agent configuration files, with permission metadata ------------------
+    # User-level locations are skipped when the operator asked to scan only --path.
+    # Credential enumeration below is user-scoped by definition, so it is skipped
+    # wholesale: reporting ~/.ssh while claiming to scan one project directory
+    # would make --no-user-scope a lie.
+    user_paths: list[Path] = (
+        [
+            *plat.claude_settings_files(home),
+            plat.claude_json(home),
+            plat.claude_user_dir(home) / ".credentials.json",
+            plat.claude_desktop_config(home),
+        ]
+        if context.user_scope
+        else []
+    )
     config_paths: list[Path] = [
-        *plat.claude_settings_files(home),
-        plat.claude_json(home),
-        plat.claude_user_dir(home) / ".credentials.json",
-        plat.claude_desktop_config(home),
+        *user_paths,
         plat.project_mcp_file(context.project_root),
         *plat.project_settings_files(context.project_root),
     ]
@@ -56,7 +67,7 @@ def discover(context: DiscoveryContext) -> list[Asset]:
         )
 
     # --- credential locations that exist for this user ------------------------
-    for sensitive in enumerate_sensitive_paths(home):
+    for sensitive in enumerate_sensitive_paths(home) if context.user_scope else []:
         keys = (
             [str(p) for p in find_private_keys(sensitive.path)]
             if sensitive.kind == "ssh"
@@ -102,7 +113,7 @@ def discover(context: DiscoveryContext) -> list[Asset]:
         )
 
     # --- agent-relevant environment variables ---------------------------------
-    env = plat.relevant_env_vars()
+    env = plat.relevant_env_vars() if context.user_scope else {}
     if env:
         assets.append(
             Asset(

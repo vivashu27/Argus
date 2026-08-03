@@ -132,7 +132,13 @@ argus scan --category secrets
 argus scan --level 1              # basic hygiene only
 argus scan --check MCP-003 --check MCP-004
 argus scan --exclude CLAUDE-005   # exclusion always wins over inclusion
+argus scan --path ./proj --no-user-scope   # only --path; skip ~/.claude entirely
 ```
+
+**Where Skills are looked for.** Discovery expects `<path>/<name>/SKILL.md`, so
+`--path` should name the directory *containing* skill folders, not a skill folder
+itself. Pointing at the skill directly finds nothing — Argus now says so rather than
+reporting a clean scan. `<path>/.claude/skills/` and `<path>/skills/` also work.
 
 ### Severity vs exit codes
 

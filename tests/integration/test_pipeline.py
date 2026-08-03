@@ -448,3 +448,60 @@ class TestScannerEvasion:
         for fmt in ("json", "yaml", "markdown", "html"):
             output = render(fmt, report)
             assert "padded" in output, f"{fmt} does not disclose the unscanned skill"
+
+
+class TestUserScopeIsolation:
+    """--no-user-scope must mean it. Regression: only half the discoverers
+    honoured the flag, so an isolated scan still reported ~/.claude, ~/.ssh,
+    Claude Desktop's MCP servers and the user's IDE extensions."""
+
+    def _isolated(self, tmp_path: Path):
+        home = tmp_path / "home"
+        project = tmp_path / "project"
+        (home / ".claude" / "skills" / "user-skill").mkdir(parents=True)
+        (home / ".claude" / "skills" / "user-skill" / "SKILL.md").write_text(
+            "---\nname: user-skill\n---\n\nUser scope.\n"
+        )
+        (home / ".claude" / "settings.json").write_text(
+            json.dumps({"mcpServers": {"user-mcp": {"command": "npx", "args": ["x"]}}})
+        )
+        (home / ".claude" / "CLAUDE.md").write_text("User instructions.\n")
+        project.mkdir()
+        return home, project
+
+    def test_no_assets_leak_from_user_scope(self, tmp_path):
+        home, project = self._isolated(tmp_path)
+        report = run_scan(
+            ScanOptions(project_root=project, home=home, user_scope=False)
+        )
+        leaked = [a.asset_id for a in report.result.assets if a.path and str(home) in str(a.path)]
+        assert leaked == [], f"user-scope assets leaked into an isolated scan: {leaked}"
+
+    def test_user_scope_enabled_still_finds_them(self, tmp_path):
+        """The isolation must not have broken the default."""
+        home, project = self._isolated(tmp_path)
+        report = run_scan(ScanOptions(project_root=project, home=home, user_scope=True))
+        found = {a.asset_id for a in report.result.assets}
+        assert any(a.startswith("skill:") for a in found), found
+
+    def test_empty_isolated_scan_is_reported_not_silent(self, tmp_path):
+        """A --path that finds nothing is a layout mistake worth naming."""
+        home, project = self._isolated(tmp_path)
+        report = run_scan(ScanOptions(project_root=project, home=home, user_scope=False))
+        errors = " ".join(report.result.metadata.discovery_errors)
+        assert "no agent assets were found" in errors
+        assert "SKILL.md" in errors, "the message should say where Skills are looked for"
+
+    def test_skill_directory_layout_hint_is_accurate(self, tmp_path):
+        """Pointing at a skill folder itself finds nothing; the parent works."""
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        parent = tmp_path / "skills_test"
+        (parent / "my-skill").mkdir(parents=True)
+        (parent / "my-skill" / "SKILL.md").write_text("---\nname: my-skill\n---\n\nBody.\n")
+
+        inner = run_scan(ScanOptions(project_root=parent / "my-skill", home=home, user_scope=False))
+        assert not [a for a in inner.result.assets if a.target is Target.SKILLS]
+
+        outer = run_scan(ScanOptions(project_root=parent, home=home, user_scope=False))
+        assert [a for a in outer.result.assets if a.target is Target.SKILLS]
