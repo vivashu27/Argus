@@ -369,6 +369,12 @@ class TestCli:
     def test_unknown_severity_is_usage_error(self, tmp_path):
         assert self._run(["scan", "--severity", "enormous"], tmp_path).returncode == 3
 
+    def test_rules_only_without_rules_is_usage_error(self, tmp_path):
+        """Silently scanning nothing would look like a clean result."""
+        result = self._run(["scan", "--rules-only"], tmp_path)
+        assert result.returncode == 3
+        assert "--rules" in result.stderr
+
     def test_multiple_file_formats_need_output_dir(self, tmp_path):
         result = self._run(["scan", "--format", "json", "--format", "html"], tmp_path)
         assert result.returncode == 3
@@ -507,25 +513,27 @@ class TestUserScopeIsolation:
         assert [a for a in outer.result.assets if a.target is Target.SKILLS]
 
 
+def _rule_env(tmp_path):
+    """A project with one Skill and one rule that always matches it."""
+    home, project = tmp_path / "home", tmp_path / "project"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    skill = project / ".claude" / "skills" / "s"
+    skill.mkdir(parents=True, exist_ok=True)
+    skill.joinpath("SKILL.md").write_text("---\nname: s\n---\n\nbody\n")
+    rules = tmp_path / "rules"
+    rules.mkdir(exist_ok=True)
+    (rules / "r.argus").write_text(
+        "id: sel-test\nname: n\nseverity: high\ntarget: skills\n"
+        "match:\n  all:\n   - field: name\n     exists: true\n"
+    )
+    return home, project, [rules]
+
+
 class TestRuleSelection:
     """--category, --target, --check and --exclude must apply to rules too."""
 
-    def _env(self, tmp_path):
-        home, project = tmp_path / "home", tmp_path / "project"
-        (home / ".claude").mkdir(parents=True, exist_ok=True)
-        skill = project / ".claude" / "skills" / "s"
-        skill.mkdir(parents=True, exist_ok=True)
-        skill.joinpath("SKILL.md").write_text("---\nname: s\n---\n\nbody\n")
-        rules = tmp_path / "rules"
-        rules.mkdir(exist_ok=True)
-        (rules / "r.argus").write_text(
-            "id: sel-test\nname: n\nseverity: high\ntarget: skills\n"
-            "match:\n  all:\n   - field: name\n     exists: true\n"
-        )
-        return home, project, [rules]
-
     def _ran(self, tmp_path, **kwargs) -> bool:
-        home, project, rules = self._env(tmp_path)
+        home, project, rules = _rule_env(tmp_path)
         report = run_scan(
             ScanOptions(project_root=project, home=home, user_scope=False,
                         rule_paths=rules, **kwargs)
@@ -547,3 +555,38 @@ class TestRuleSelection:
     def test_include_by_check_id(self, tmp_path):
         assert self._ran(tmp_path, include_ids=["CUSTOM-SEL-TEST"])
         assert not self._ran(tmp_path, include_ids=["MCP-003"])
+
+
+class TestRulesOnly:
+    """--rules-only suppresses the built-in checks and nothing else."""
+
+    def _report(self, tmp_path, **kwargs):
+        home, project, rules = _rule_env(tmp_path)
+        return run_scan(
+            ScanOptions(project_root=project, home=home, user_scope=False,
+                        rule_paths=rules, **kwargs)
+        )
+
+    def test_only_rule_findings_remain(self, tmp_path):
+        report = self._report(tmp_path, rules_only=True)
+        assert report.result.findings
+        assert all(f.check_id.startswith("CUSTOM-") for f in report.result.findings)
+
+    def test_built_in_checks_run_without_the_flag(self, tmp_path):
+        report = self._report(tmp_path)
+        assert any(not f.check_id.startswith("CUSTOM-") for f in report.result.findings)
+
+    def test_discovery_still_runs_so_rules_have_assets(self, tmp_path):
+        """The rule matches a discovered Skill, so suppressing checks must not
+        suppress discovery."""
+        report = self._report(tmp_path, rules_only=True)
+        assert [a for a in report.result.assets if a.target is Target.SKILLS]
+        assert any(f.check_id == "CUSTOM-SEL-TEST" and f.status is Status.FAIL
+                   for f in report.result.findings)
+
+    def test_selection_flags_still_narrow_rules(self, tmp_path):
+        assert not any(
+            f.check_id == "CUSTOM-SEL-TEST"
+            for f in self._report(tmp_path, rules_only=True,
+                                  categories={Category.MCP}).result.findings
+        )

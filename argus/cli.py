@@ -131,6 +131,7 @@ def scan(
     exit_zero: bool = typer.Option(False, "--exit-zero", help="Always exit 0 when the scan itself completes."),
     no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Scan only --path; skip user-level locations (~/.claude, Claude Desktop)."),
     rules: list[Path] | None = typer.Option(None, "--rules", "-r", help="Custom .argus rule file or directory. Repeatable."),
+    rules_only: bool = typer.Option(False, "--rules-only", help="Run only custom .argus rules; skip the built-in AASB checks."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
 ) -> None:
     """Discover and audit AI-agent configuration in this environment."""
@@ -181,6 +182,10 @@ def scan(
     if len(file_formats) > 1 and output_dir is None:
         _fail("multiple output formats require --output DIR")
 
+    rule_paths = list(rules or []) or [Path(p) for p in config.rules]
+    if rules_only and not rule_paths:
+        _fail("--rules-only needs rules: pass --rules FILE|DIR, or set 'rules:' in argus.yaml")
+
     # --- run ------------------------------------------------------------------
     options = ScanOptions(
         project_root=project_root,
@@ -193,7 +198,8 @@ def scan(
         weights=config.weights or None,
         score_accepted_risk=config.score_accepted_risk,
         user_scope=not no_user_scope,
-        rule_paths=list(rules or []) or [Path(p) for p in config.rules],
+        rule_paths=rule_paths,
+        rules_only=rules_only,
         verbose=verbose,
     )
 
@@ -517,16 +523,14 @@ def rule_test(
     no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Skip user-level locations."),
 ) -> None:
     """Run rules against this environment and show only their findings."""
-    from .core.models import Category
-
     log.configure(verbose=False)
     try:
         report = run_scan(
             ScanOptions(
                 project_root=(path or Path.cwd()).expanduser(),
-                categories={Category.CUSTOM},
                 user_scope=not no_user_scope,
                 rule_paths=list(paths),
+                rules_only=True,
             )
         )
     except Exception as exc:  # noqa: BLE001

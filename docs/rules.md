@@ -154,11 +154,27 @@ raises reports `ERROR` for that asset and the scan continues.
 ## Running rules
 
 ```bash
-argus scan --rules ./rules                  # file or directory, repeatable
-argus scan --rules a.argus --rules ./team   # combine sources
+argus scan --rules ./rules                  # every *.argus in the directory
+argus scan --rules ./rules/one.argus        # a single rule file
+argus scan --rules a.argus --rules ./team   # repeatable, sources combine
+argus scan --rules ./rules --rules-only     # skip the built-in AASB checks
 argus rule validate ./rules                 # schema check, no scan
 argus rule test ./rules                     # run only rules, full evidence
 ```
+
+`--rules` takes a file or a directory, so pointing at one template and pointing at a
+tree of them are the same flag. Directories are searched to depth 4 for `*.argus`.
+
+`--rules-only` suppresses the built-in checks and reports your rules alone — useful
+when you are iterating on a rule and do not want 63 benchmark findings in the way, or
+when a policy repo owns its own definition of a pass. Discovery still runs in full,
+because rules match against discovered assets. The score is then computed over your
+rules only, so an 80/100 from `--rules-only` is not comparable to an ordinary scan.
+It is a usage error without `--rules`, since scanning nothing would otherwise print a
+clean-looking result.
+
+`argus rule test` is the same thing with evidence always shown, and it takes its rule
+paths as arguments rather than as a flag.
 
 Or persist them in `argus.yaml`:
 

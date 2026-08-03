@@ -31,3 +31,6 @@ argus.yaml
 # Local working files, not part of the project
 project_outline.txt
 claude_session
+
+# Local rule authoring — personal templates, not part of the project
+rules/

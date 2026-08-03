@@ -77,6 +77,7 @@ class ScanOptions:
     score_accepted_risk: bool = False
     user_scope: bool = True
     rule_paths: list[Path] = field(default_factory=list)
+    rules_only: bool = False
     verbose: bool = False
 
 
@@ -123,13 +124,18 @@ def run_scan(options: ScanOptions) -> ScanReport:
             "so point at the directory that contains skill folders, not at one of them."
         )
 
-    # 4-5. Static analysis and security checks
-    checks = select(
-        targets=options.targets,
-        categories=options.categories,
-        include_ids=options.include_ids,
-        exclude_ids=options.exclude_ids,
-        level=options.level,
+    # 4-5. Static analysis and security checks. Discovery still runs in full under
+    # rules_only: rules match against assets, so they need the same inventory.
+    checks = (
+        []
+        if options.rules_only
+        else select(
+            targets=options.targets,
+            categories=options.categories,
+            include_ids=options.include_ids,
+            exclude_ids=options.exclude_ids,
+            level=options.level,
+        )
     )
     context = check_base.CheckContext(
         assets=assets,

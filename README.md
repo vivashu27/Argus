@@ -197,6 +197,7 @@ tags: [mcp, supply-chain]
 
 ```bash
 argus scan --rules ./rules              # a file or a directory, repeatable
+argus scan --rules ./rules --rules-only # your rules alone, no built-in checks
 argus rule validate ./rules             # schema-check without scanning
 argus rule test ./rules                 # run only your rules, with full evidence
 ```

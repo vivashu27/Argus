@@ -223,7 +223,10 @@ def render(report: ScanReport, console: Console | None = None, verbose: bool = F
             out.print(Text(f"  {finding.check_id}: {finding.detail}", "red"))
 
     if verbose:
-        _print_coverage(out, report)
+        # An all-zero coverage table after a rules-only scan reads as "the benchmark
+        # found nothing", when in fact no benchmark check ran at all.
+        if any(not f.check_id.startswith("CUSTOM-") for f in report.result.findings):
+            _print_coverage(out, report)
         _print_breakdown(out, report)
 
     if metadata.discovery_errors:
