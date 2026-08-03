@@ -130,9 +130,7 @@ def scan(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show all evidence, coverage, and score derivation."),
     exit_zero: bool = typer.Option(False, "--exit-zero", help="Always exit 0 when the scan itself completes."),
     no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Scan only --path; skip user-level locations (~/.claude, Claude Desktop)."),
-    llm: bool = typer.Option(False, "--llm", help="Enable LLM-assisted review (section 9). Sends REDACTED excerpts to a third-party API. Off by default."),
-    llm_provider: str | None = typer.Option(None, "--llm-provider", help="openai | anthropic | moonshot | deepseek."),
-    llm_model: str | None = typer.Option(None, "--llm-model", help="Override the provider default model."),
+    rules: list[Path] | None = typer.Option(None, "--rules", "-r", help="Custom .argus rule file or directory. Repeatable."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
 ) -> None:
     """Discover and audit AI-agent configuration in this environment."""
@@ -184,33 +182,6 @@ def scan(
         _fail("multiple output formats require --output DIR")
 
     # --- run ------------------------------------------------------------------
-    llm_settings = config.llm
-    if llm:
-        llm_settings.enabled = True
-    if llm_provider:
-        llm_settings.provider = llm_provider.strip().lower()
-    if llm_model:
-        llm_settings.model = llm_model
-
-    llm_config = None
-    if llm_settings.enabled:
-        from .llm import LLMConfig
-        from .llm.reviewer import PASSES
-
-        selected_passes = tuple(llm_settings.passes) or tuple(PASSES)
-        unknown = [p for p in selected_passes if p not in PASSES]
-        if unknown:
-            _fail(f"unknown llm pass(es): {', '.join(unknown)}. Choose from: {', '.join(PASSES)}")
-        llm_config = LLMConfig(
-            enabled=True,
-            provider=llm_settings.provider,
-            model=llm_settings.model,
-            timeout=llm_settings.timeout,
-            max_assets=llm_settings.max_assets,
-            max_bytes_per_asset=llm_settings.max_bytes_per_asset,
-            passes=selected_passes,
-        )
-
     options = ScanOptions(
         project_root=project_root,
         targets=targets,
@@ -222,7 +193,7 @@ def scan(
         weights=config.weights or None,
         score_accepted_risk=config.score_accepted_risk,
         user_scope=not no_user_scope,
-        llm=llm_config,
+        rule_paths=list(rules or []) or [Path(p) for p in config.rules],
         verbose=verbose,
     )
 
@@ -438,6 +409,111 @@ def check(
         EXIT_FINDINGS
         if any(f.status is Status.FAIL and not f.accepted_risk for f in report.result.findings)
         else EXIT_OK
+    )
+
+
+rule_app = typer.Typer(
+    name="rule",
+    help="Create, validate and test custom .argus rules.",
+    no_args_is_help=True,
+)
+app.add_typer(rule_app)
+
+
+@rule_app.command("new")
+def rule_new(
+    prompt: str = typer.Argument(..., help="Describe what the rule should detect."),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write to this path instead of stdout."),
+    provider: str = typer.Option("openai", "--provider", help="openai | anthropic | moonshot | deepseek."),
+    model: str | None = typer.Option(None, "--model", help="Override the provider default model."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing file."),
+) -> None:
+    """Generate a rule from a prompt using an AI provider.
+
+    Only your prompt and the rule schema are sent. No scanned configuration ever
+    leaves the machine, and the result is validated before it is written.
+    """
+    from .rules.generate import GeneratedRule, LLMError, RuleError, generate_rule
+    from .rules.providers import build_provider, consent_line
+
+    try:
+        preview = build_provider(provider, model=model, api_key="preview")
+        err_console.print(Text(consent_line(preview), style="dim"))
+    except LLMError as exc:
+        _fail(str(exc))
+
+    try:
+        generated: GeneratedRule = generate_rule(prompt, provider=provider, model=model)
+    except LLMError as exc:
+        _fail(str(exc), EXIT_SCANNER_ERROR)
+    except RuleError as exc:
+        _fail(f"the model did not produce a valid rule — {exc}", EXIT_SCANNER_ERROR)
+
+    if output is None:
+        console.print(generated.yaml_text, markup=False, highlight=False)
+        raise typer.Exit(EXIT_OK)
+
+    destination = output if output.suffix == ".argus" else output.with_suffix(".argus")
+    if destination.exists() and not force:
+        _fail(f"{destination} already exists. Pass --force to overwrite.")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(generated.yaml_text, encoding="utf-8")
+    except OSError as exc:
+        _fail(f"cannot write {destination}: {exc}", EXIT_SCANNER_ERROR)
+
+    err_console.print(Text(f"wrote {destination}", style="green"))
+    console.print(
+        Text(f"  Review it before use, then run: argus scan --rules {destination}", style="dim")
+    )
+    raise typer.Exit(EXIT_OK)
+
+
+@rule_app.command("validate")
+def rule_validate(
+    paths: list[Path] = typer.Argument(..., help="Rule files or directories."),
+) -> None:
+    """Check that rule files parse and conform to the schema."""
+    from .rules import load_rules
+
+    loaded, errors = load_rules(list(paths))
+    for rule in loaded:
+        console.print(
+            Text.assemble(("  ok    ", "green"), (f"{rule.rule_id:28}", "bold"),
+                          (f"{rule.severity.value:8} ", "dim"), (rule.target.value, "cyan"))
+        )
+    for message in errors:
+        err_console.print(Text(f"  error {message}", style="red"))
+
+    console.print(Text(f"\n  {len(loaded)} valid, {len(errors)} invalid.", style="dim"))
+    raise typer.Exit(EXIT_USAGE_ERROR if errors else EXIT_OK)
+
+
+@rule_app.command("test")
+def rule_test(
+    paths: list[Path] = typer.Argument(..., help="Rule files or directories."),
+    path: Path | None = typer.Option(None, "--path", "-p", help="Project root to test against."),
+    no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Skip user-level locations."),
+) -> None:
+    """Run rules against this environment and show only their findings."""
+    from .core.models import Category
+
+    log.configure(verbose=False)
+    try:
+        report = run_scan(
+            ScanOptions(
+                project_root=(path or Path.cwd()).expanduser(),
+                categories={Category.CUSTOM},
+                user_scope=not no_user_scope,
+                rule_paths=list(paths),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"scan failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
+
+    terminal.render(report, console=console, verbose=True)
+    raise typer.Exit(
+        EXIT_FINDINGS if any(f.is_open for f in report.result.findings) else EXIT_OK
     )
 
 

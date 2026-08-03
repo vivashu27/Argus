@@ -1,0 +1,18 @@
+# Example .argus rule. Run with:  argus scan --rules examples/rules
+id: mcp-unpinned-npx
+name: MCP server launched via npx with no version pin
+severity: high
+target: mcp
+
+match:
+  all:
+    - field: command
+      contains: npx
+    - field: args
+      not_regex: '@\d+\.\d+\.\d+'
+
+description: >-
+  npx resolves and executes the newest matching package at launch, so the code
+  reviewed at configuration time is not necessarily the code that runs.
+remediation: Pin the package to an exact version, or vendor the server locally.
+tags: [mcp, supply-chain]

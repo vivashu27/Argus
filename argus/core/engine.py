@@ -76,7 +76,7 @@ class ScanOptions:
     weights: dict[Severity, float] | None = None
     score_accepted_risk: bool = False
     user_scope: bool = True
-    llm: Any = None  # argus.llm.LLMConfig; typed loosely to keep the import optional
+    rule_paths: list[Path] = field(default_factory=list)
     verbose: bool = False
 
 
@@ -122,21 +122,11 @@ def run_scan(options: ScanOptions) -> ScanReport:
         exclude_ids=options.exclude_ids,
         level=options.level,
     )
-    # LLM review sits between discovery and checks: it needs assets, and the
-    # section 9 checks need its result. Off unless explicitly enabled.
-    llm_review = None
-    if options.llm is not None and getattr(options.llm, "enabled", False):
-        from ..llm import review as run_llm_review
-
-        llm_review = run_llm_review(assets, options.llm, home=home)
-        for message in llm_review.errors:
-            discovery_context.record_error(f"llm review: {message}")
-
     context = check_base.CheckContext(
         assets=assets,
         project_root=options.project_root,
         home=home,
-        options={"verbose": options.verbose, "llm_review": llm_review},
+        options={"verbose": options.verbose},
     )
 
     findings: list[Finding] = []
@@ -154,6 +144,16 @@ def run_scan(options: ScanOptions) -> ScanReport:
                 )
             ]
         findings.extend(produced or [])
+
+    # Custom .argus rules run after the built-in checks. They are deterministic,
+    # so their findings are real: they score and gate like any other check.
+    if options.rule_paths:
+        from ..rules import load_rules, run_rules
+
+        rules, rule_errors = load_rules(options.rule_paths)
+        for message in rule_errors:
+            discovery_context.record_error(f"rule: {message}")
+        findings.extend(run_rules(rules, assets))
 
     # 6-7. Normalization and risk classification
     expired = _apply_exceptions(findings, options.exceptions)

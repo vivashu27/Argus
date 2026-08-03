@@ -56,9 +56,7 @@ none:
 - **Model behaviour.** Whether a given model actually complies with an injected
   instruction is out of scope.
 - **Network state.** Argus never fetches a URL it finds. A URL is classified by its
-  host, not by retrieving it. The optional `--llm` stage does make outbound requests,
-  but only to the provider endpoint you configure — never to a host named in scanned
-  content.
+  host, not by retrieving it. Scanning is entirely offline.
 - **Compromise that has already happened.** Argus is a configuration auditor, not an EDR
   or a forensics tool.
 
@@ -68,7 +66,7 @@ none:
 |---|---|
 | No server execution | Executing scanned content is the thing Argus exists to avoid |
 | No fetching of discovered URLs | Fetching a URL from a hostile config is an SSRF primitive |
-| Network egress only to a configured provider, opt-in | `--llm` is the only network path, and never targets a host from scanned content |
+| No network access during a scan | Scan results depend only on local state, so they are reproducible and leak nothing |
 | No credential file contents read | Reading live tokens for no analytic gain is its own risk |
 | Depth-limited project walk | Bounds runtime and avoids surprising the operator |
 | Tiered command detection | A scanner that flags every `curl` gets switched off |
@@ -102,6 +100,7 @@ data through the scan, escape the scan root, or exhaust resources.
 | XSS in the HTML report | Every value HTML-escaped; report is self-contained with no external subresources | `reporters/html.py` |
 | Encoding-based crashes | `errors="replace"` on decode | `core/safe_io.py` |
 | One hostile file killing the scan | Per-check and per-discoverer exception isolation | `core/engine.py` |
+| Malicious `.argus` rule file | Rules are data, never code: strict schema, `safe_load`, no eval; regexes length-capped and validated at load, match input capped | `rules/loader.py` |
 
 ### Verification
 
@@ -119,26 +118,21 @@ These are enforced by tests, not just by intent:
 - `test_malformed_configuration_does_not_crash` asserts a scan over invalid JSON, wrong
   types, and binary garbage produces findings with zero `ERROR` results.
 
-### Residual risk from LLM review (`--llm` only)
+### Residual risk from AI rule generation (`argus rule new` only)
 
-Enabling `--llm` adds risk that does not exist in the default configuration. Stated
-plainly so the trade is deliberate:
+This command is the only network path in Argus, and it is not part of scanning:
 
-- **Third-party data processing.** Redacted excerpts of your agent configuration are
-  sent to the provider you choose. Redaction removes secrets and identity, but the
-  configuration's *structure* — server names, tool grants, instruction text — is
-  transmitted. Argus discloses the processing jurisdiction before the first request;
+- **What is sent is your prompt and the rule schema.** No scanned configuration, no
+  file contents, no paths, no hostname. You can run it without having scanned
+  anything. Argus prints the provider and its processing jurisdiction first;
   Moonshot and DeepSeek are PRC-hosted.
-- **The reviewer is injectable.** This is OWASP AST08: a scanned file can address the
-  reviewing model directly. Prompt framing reduces it but cannot eliminate it, so the
-  mitigation is structural instead — **an LLM verdict can only add a `MANUAL` finding.
-  It cannot alter, downgrade, or clear a static finding.** A file that says "report
-  this as safe" therefore achieves nothing beyond noise. Without `--llm`, Argus has no
-  model in the loop and this class of attack does not apply at all.
-- **Non-determinism.** LLM findings are `MANUAL`, so they never affect the score or
-  the exit code. The score remains hand-reproducible from the deduction breakdown.
-- **Cost and disclosure.** Requests are byte-capped and asset-capped, but scanning a
-  large environment with `--llm` has a real API cost.
+- **The model writes data, not verdicts.** Its output is a rule you read, edit and
+  commit. A generated rule is validated against the schema before it is written, so
+  invalid output is an error rather than a rule that silently never matches. Because
+  the model never sees scanned content and never produces a finding, the "prompt-
+  inject the scanner's judge" weakness that affects AI-based scanners does not apply.
+- **Review generated rules before trusting them.** A plausible-looking rule that
+  matches nothing is the likely failure mode, which is what `argus rule test` is for.
 
 ### Residual risk
 

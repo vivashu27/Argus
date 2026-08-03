@@ -47,12 +47,11 @@ Argus is read-only and never executes what it scans. Specifically it does not:
 - run commands found in configuration or instruction files
 - deserialize scanned content into executable objects
 
-**Network access is the one conditional property.** By default Argus makes no network
-requests at all. The optional `--llm` review stage is the sole exception: when
-explicitly enabled it sends **redacted excerpts** of scanned configuration to the
-provider you select. Secrets are redacted and the home path, username and hostname are
-stripped before transmission. It is off unless you ask for it, and API keys are read
-only from environment variables — never from `argus.yaml`, which Argus itself scans.
+**Argus makes no network requests while scanning.** The one command that uses the
+network is `argus rule new`, which asks an AI provider to write a rule from your
+prompt. What it sends is your prompt and the rule schema — never scanned
+configuration, file contents, paths or hostnames. API keys are read from environment
+variables only, never from `argus.yaml`, which Argus itself scans.
 
 These properties are enforced by tests, notably
 `tests/integration/test_pipeline.py::TestSafety`, which scans a deliberately malicious

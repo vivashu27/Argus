@@ -203,12 +203,7 @@ class TestPipeline:
         (home / ".claude").mkdir(parents=True)
         project.mkdir()
         report = run_scan(ScanOptions(project_root=project, home=home, targets={Target.HOOKS}))
-        # LLM-003 also declares applies_to={HOOKS}, so section 9 is selected too; it
-        # reports NOT_APPLICABLE while --llm is off.
-        assert {f.meta.category for f in report.result.findings} == {
-            Category.HOOKS,
-            Category.LLM,
-        }
+        assert {f.meta.category for f in report.result.findings} == {Category.HOOKS}
 
     def test_category_filter_limits_checks(self, tmp_path):
         home, project = tmp_path / "home", tmp_path / "project"

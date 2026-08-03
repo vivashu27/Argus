@@ -23,19 +23,6 @@ class ReportConfig:
 
 
 @dataclass
-class LLMSettings:
-    """LLM review settings. Disabled unless explicitly turned on."""
-
-    enabled: bool = False
-    provider: str = "openai"
-    model: str | None = None
-    timeout: int = 60
-    max_assets: int = 20
-    max_bytes_per_asset: int = 8000
-    passes: list[str] = field(default_factory=list)
-
-
-@dataclass
 class ArgusConfig:
     include: list[Target] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
@@ -46,8 +33,8 @@ class ArgusConfig:
     weights: dict[Severity, float] = field(default_factory=dict)
     score_accepted_risk: bool = False
     report: ReportConfig = field(default_factory=ReportConfig)
+    rules: list[str] = field(default_factory=list)
     exceptions: list[dict[str, Any]] = field(default_factory=list)
-    llm: LLMSettings = field(default_factory=LLMSettings)
     source: Path | None = None
 
 
@@ -129,31 +116,13 @@ def load_config(path: Path | None) -> ArgusConfig:
         if report.get("output"):
             config.report.output = str(report["output"])
 
-    llm = data.get("llm") or {}
-    if llm and not isinstance(llm, dict):
-        raise ArgusConfigError(f"{path}: 'llm' must be a mapping")
-    if isinstance(llm, dict):
-        config.llm.enabled = bool(llm.get("enabled", False))
-        if llm.get("provider"):
-            config.llm.provider = str(llm["provider"]).strip().lower()
-        if llm.get("model"):
-            config.llm.model = str(llm["model"])
-        for key in ("timeout", "max_assets", "max_bytes_per_asset"):
-            if llm.get(key) is not None:
-                try:
-                    setattr(config.llm, key, int(llm[key]))
-                except (TypeError, ValueError) as exc:
-                    raise ArgusConfigError(f"{path}: 'llm.{key}' must be an integer") from exc
-        passes = llm.get("passes")
-        if isinstance(passes, list):
-            config.llm.passes = [str(v).strip().lower() for v in passes]
-        # An API key in argus.yaml would be a credential in a file Argus scans.
-        for forbidden in ("api_key", "apikey", "key", "token"):
-            if forbidden in llm:
-                raise ArgusConfigError(
-                    f"{path}: 'llm.{forbidden}' is not supported. Argus reads API keys "
-                    "from environment variables only, never from a config file it scans."
-                )
+    raw_rules = data.get("rules") or []
+    if isinstance(raw_rules, str):
+        config.rules = [raw_rules]
+    elif isinstance(raw_rules, list):
+        config.rules = [str(v) for v in raw_rules]
+    else:
+        raise ArgusConfigError(f"{path}: 'rules' must be a path or a list of paths")
 
     exceptions = data.get("exceptions") or []
     if not isinstance(exceptions, list):

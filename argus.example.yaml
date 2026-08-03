@@ -54,24 +54,14 @@ report:
   # Required when more than one file format is selected.
   # output: ./reports
 
-# Optional LLM-assisted review (section 9). THE ONLY PART OF ARGUS THAT USES THE
-# NETWORK. Off unless enabled here or via --llm.
+# Custom .argus rule files or directories. Rule findings are deterministic, so they
+# score and gate the exit code exactly like a built-in check.
 #
-# Redacted excerpts of scanned configuration are sent to the provider you choose:
-# secrets redacted, home path/username/hostname stripped. Findings are advisory
-# (always MANUAL) so they never affect the score or the exit code.
-#
-# API keys are read from environment variables ONLY. Putting a key here is a hard
-# error — this file is one Argus itself scans.
-llm:
-  enabled: false
-  provider: openai            # openai | anthropic | moonshot | deepseek
-  # moonshot and deepseek are PRC-hosted; Argus discloses this before sending.
-  # model: gpt-4o-mini        # omit for the provider default
-  max_assets: 20
-  max_bytes_per_asset: 8000
-  timeout: 60
-  passes: [injection, mcp, hooks, trifecta]
+# Generate rules with:  argus rule new "<what to detect>" -o ./rules/x.argus
+# API keys for that command come from environment variables only, never from here.
+rules: []
+  # - ./rules
+  # - ./team-policy.argus
 
 # Accepted risks.
 #

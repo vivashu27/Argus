@@ -1,0 +1,18 @@
+# Skills that write to agent identity files can persist across uninstall.
+id: skill-writes-identity-file
+name: Skill references an agent identity file
+severity: critical
+target: skills
+
+match:
+  any:
+    - field: body
+      regex: '(CLAUDE|AGENTS|MEMORY|SOUL)\.md'
+    - field: allowed_tools
+      contains: Write
+
+description: >-
+  Instructions written into an agent identity file are reloaded every session and
+  survive removal of the Skill that wrote them.
+remediation: Remove the reference, or scope the Skill's write access away from identity files.
+tags: [skills, persistence]

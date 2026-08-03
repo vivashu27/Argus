@@ -3,7 +3,7 @@
 > **Generated file.** Produced from the check registry by
 > `python scripts/gen_checks_doc.py > docs/checks.md`. Do not edit by hand.
 
-67 checks across 9 sections.
+63 checks across 8 sections.
 
 ## Index
 
@@ -72,10 +72,6 @@
 | `FS-005` | 8.5 | 1 | HIGH | Filesystem | Unsafe permissions on agent configuration file |
 | `FS-006` | 8.6 | 2 | MEDIUM | Filesystem | Symlink escapes the workspace |
 | `FS-007` | 8.7 | 1 | CRITICAL | Filesystem | World-writable agent configuration |
-| `LLM-001` | 9.1 | 2 | HIGH | LLM-Assisted Review | LLM review of instruction files and Skills for prompt injection |
-| `LLM-002` | 9.2 | 2 | MEDIUM | LLM-Assisted Review | LLM review of MCP server capability and destructive potential |
-| `LLM-003` | 9.3 | 2 | HIGH | LLM-Assisted Review | LLM review of hook intent |
-| `LLM-004` | 9.4 | 2 | HIGH | LLM-Assisted Review | LLM correlation review for the lethal trifecta |
 
 ## Levels
 
@@ -1146,77 +1142,6 @@ An agent configuration file or directory is writable by any local user.
 **Compliance mapping.** CWE: CWE-732: Incorrect Permission Assignment for Critical Resource; OWASP LLM Top 10 2025: LLM03: Supply Chain
 
 **References.** https://cwe.mitre.org/data/definitions/732.html
-
-
----
-
-## 9. LLM-Assisted Review
-
-4 checks — 0 at Level 1, 4 at Level 2.
-
-### LLM-001 — LLM review of instruction files and Skills for prompt injection
-
-**AASB 9.1** · Level 2 · **HIGH** · applies to: instructions, skills
-
-An LLM reviewed instruction files and Skill bodies for injection and security-control subversion that pattern matching does not cover.
-
-**Detection rationale.** Regex detects known phrasings. A model can recognise novel wording, directives split across sentences, and indirection — the gap OWASP AST08 identifies in pattern-matching scanners. It is also itself injectable, which is why these results are advisory and additive only.
-
-**Security impact.** An injected directive that evades static detection persists across every session that loads the file.
-
-**Remediation.** Adjudicate each reported item against the cited file. Confirmed injections should be removed and the file's write access reviewed.
-
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection
-
-**References.** https://owasp.org/www-project-agentic-skills-top-10/, https://owasp.org/www-project-top-10-for-large-language-model-applications/
-
-### LLM-002 — LLM review of MCP server capability and destructive potential
-
-**AASB 9.2** · Level 2 · **MEDIUM** · applies to: mcp
-
-An LLM assessed what capability each MCP server plausibly grants, covering the questions MCP-010 and MCP-011 report as MANUAL.
-
-**Detection rationale.** MCP-010 and MCP-011 return MANUAL because enumerating a server's real tool surface needs a handshake Argus will not perform. A model can at least reason about the configured command and arguments.
-
-**Security impact.** An unassessed server may expose destructive tools reachable by prompt injection.
-
-**Remediation.** Review the named server's tool implementations against its declared purpose.
-
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency
-
-**References.** https://modelcontextprotocol.io/docs/concepts/tools
-
-### LLM-003 — LLM review of hook intent
-
-**AASB 9.3** · Level 2 · **HIGH** · applies to: hooks
-
-An LLM assessed whether each hook's behaviour matches its apparent purpose.
-
-**Detection rationale.** Hooks run automatically with no per-invocation approval, so intent matters more than syntax. Whether a hook does more than its name implies is a judgement call, not a pattern match.
-
-**Security impact.** A hook exceeding its stated purpose has automatic, unattended reach.
-
-**Remediation.** Read the named hook script and confirm its behaviour matches its purpose.
-
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency
-
-**References.** https://docs.anthropic.com/en/docs/claude-code/hooks
-
-### LLM-004 — LLM correlation review for the lethal trifecta
-
-**AASB 9.4** · Level 2 · **HIGH** · applies to: claude-code, mcp, skills
-
-An LLM assessed whether the environment combines private-data access, untrusted content exposure, and an outbound channel.
-
-**Detection rationale.** The trifecta is a property of the environment as a whole, not of any single file, so no per-asset check can detect it. This is the clearest case where cross-asset reasoning adds something regex cannot.
-
-**Security impact.** Each leg is individually routine; together they make prompt injection directly exploitable for credential exfiltration.
-
-**Remediation.** Break one leg: deny credential paths, constrain network tools to an allowlist, or vet the untrusted content source.
-
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure; MITRE ATLAS: AML.T0057: LLM Data Leakage
-
-**References.** https://owasp.org/www-project-agentic-skills-top-10/
 
 
 ---

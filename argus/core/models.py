@@ -67,7 +67,7 @@ class Category(str, Enum):
     INSTRUCTIONS = "instructions"
     SECRETS = "secrets"
     FILESYSTEM = "filesystem"
-    LLM = "llm"
+    CUSTOM = "custom"
 
     @property
     def section(self) -> int:
@@ -97,7 +97,7 @@ _CATEGORY_SECTION: dict[Category, int] = {
     Category.INSTRUCTIONS: 6,
     Category.SECRETS: 7,
     Category.FILESYSTEM: 8,
-    Category.LLM: 9,
+    Category.CUSTOM: 9,
 }
 
 _CATEGORY_DISPLAY: dict[Category, str] = {
@@ -109,7 +109,7 @@ _CATEGORY_DISPLAY: dict[Category, str] = {
     Category.INSTRUCTIONS: "Instruction Files",
     Category.SECRETS: "Secrets",
     Category.FILESYSTEM: "Filesystem",
-    Category.LLM: "LLM-Assisted Review",
+    Category.CUSTOM: "Custom Rules",
 }
 
 
@@ -207,8 +207,14 @@ class CheckMeta:
 
     @property
     def aasb(self) -> str:
-        """CIS-style derived benchmark number, e.g. 'CLAUDE-001' -> '1.1' (spec 3.1)."""
+        """CIS-style derived benchmark number, e.g. 'CLAUDE-001' -> '1.1' (spec 3.1).
+
+        Custom rules carry slug identifiers rather than numbers and are not part of
+        the benchmark, so they report their category instead of a fabricated number.
+        """
         numeric = self.check_id.rsplit("-", 1)[-1]
+        if not numeric.isdigit():
+            return self.category.value
         return f"{self.category.section}.{int(numeric)}"
 
     def compliance_dict(self) -> dict[str, list[str]]:

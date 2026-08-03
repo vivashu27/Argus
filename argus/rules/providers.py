@@ -1,4 +1,7 @@
-"""Provider adapters, built on the standard library only.
+"""Provider adapters for AI rule generation, built on the standard library only.
+
+Used solely by :mod:`argus.rules.generate`. Nothing scanned is ever sent through
+here — the payload is the operator's own prompt plus the rule schema.
 
 Argus is a security tool, so its dependency surface is part of its threat model.
 Adding the official SDKs for four providers would pull a large transitive tree in
@@ -46,7 +49,7 @@ class ProviderSpec:
     default_model: str
     key_env: str
     style: str  # "openai" | "anthropic"
-    #: Data-residency note surfaced to the operator before anything is sent.
+    #: Data-residency note surfaced to the operator before a prompt is sent.
     jurisdiction: str = ""
 
 
@@ -201,7 +204,7 @@ def build_provider(
     resolved = api_key or os.environ.get(spec.key_env, "")
     if not resolved and transport is None:
         raise LLMError(
-            f"{spec.key_env} is not set. Export it to use --llm-provider {key}; "
+            f"{spec.key_env} is not set. Export it to use --provider {key}; "
             "Argus never reads API keys from argus.yaml."
         )
 
@@ -214,10 +217,9 @@ def build_provider(
     )
 
 
-def consent_line(provider: Provider, asset_count: int) -> str:
-    """One-line disclosure printed before the first request."""
+def consent_line(provider: Provider) -> str:
+    """One-line disclosure printed before a prompt is sent."""
     return (
-        f"LLM review: sending {asset_count} redacted asset excerpt(s) to "
-        f"{provider.name} ({provider.model}), processed in {provider.spec.jurisdiction}. "
-        "Secrets are redacted and host/user identifiers stripped before transmission."
+        f"Sending your prompt to {provider.name} ({provider.model}), processed in "
+        f"{provider.spec.jurisdiction}. No scanned configuration is transmitted."
     )

@@ -56,7 +56,7 @@ SECTION_TITLES: dict[int, str] = {
     6: "Instruction Files",
     7: "Secrets",
     8: "Filesystem",
-    9: "LLM-Assisted Review",
+    9: "Custom Rules",
 }
 
 

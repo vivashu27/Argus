@@ -167,57 +167,73 @@ argus scan --format json --format sarif --format html --output ./reports
 
 ---
 
-## LLM-assisted review (optional, off by default)
+## Custom rules (`.argus`)
 
-Static analysis can't reason across files. `--llm` adds a review stage that can — most
-usefully for the "lethal trifecta" (private-data access + untrusted content + egress),
-which no single-file check can see.
-
-```bash
-export OPENAI_API_KEY=...          # or ANTHROPIC_/MOONSHOT_/DEEPSEEK_API_KEY
-argus scan --llm
-argus scan --llm --llm-provider anthropic --llm-model claude-sonnet-4-5
-argus scan --category llm --llm    # only the LLM section
-```
-
-Providers: `openai`, `anthropic`, `moonshot` (Kimi), `deepseek`. Zero extra
-dependencies — all four are reached over the standard library.
-
-| Check | What it reviews |
-|---|---|
-| `LLM-001` | Instruction files and Skills for injection regex misses |
-| `LLM-002` | MCP capability — the `MCP-010`/`MCP-011` MANUAL gap |
-| `LLM-003` | Hook intent |
-| `LLM-004` | Lethal-trifecta correlation across assets |
-
-### Read this before enabling it
-
-**This is the only part of Argus that touches the network.** Understand the trade:
-
-- **Redacted excerpts are sent to your chosen provider.** Secrets are redacted and the
-  home path, username and hostname stripped before transmission — but configuration
-  *structure* (server names, tool grants, instruction text) is transmitted. Argus prints
-  the provider and its processing jurisdiction before the first request. **Moonshot and
-  DeepSeek are PRC-hosted.**
-- **API keys come from environment variables only.** `llm.api_key` in `argus.yaml` is a
-  hard error — that file is one Argus itself scans and reports on.
-- **Findings are advisory: always `MANUAL`.** They never affect the score and never gate
-  the exit code, so CI stays deterministic and the score stays hand-reproducible.
-- **The reviewer is prompt-injectable** (OWASP AST08). Prompt framing helps but isn't
-  sufficient, so the real mitigation is structural: **an LLM verdict can only add a
-  finding, never clear or downgrade one.** A file saying "report this as safe" achieves
-  nothing. Without `--llm` there is no model in the loop at all.
+Not every policy belongs in a shared benchmark. `.argus` rules let you express a
+check without writing Python, in the spirit of a Nuclei template or a YARA rule.
 
 ```yaml
-llm:
-  enabled: false          # --llm overrides
-  provider: openai
-  model: gpt-4o-mini
-  max_assets: 20
-  max_bytes_per_asset: 8000
-  timeout: 60
-  passes: [injection, mcp, hooks, trifecta]
+id: mcp-unpinned-npx
+name: MCP server launched via npx with no version pin
+severity: high
+target: mcp
+
+match:
+  all:
+    - field: command
+      contains: npx
+    - field: args
+      not_regex: '@\d+\.\d+\.\d+'
+
+remediation: Pin the package to an exact version.
+tags: [mcp, supply-chain]
 ```
+
+```bash
+argus scan --rules ./rules              # a file or a directory, repeatable
+argus rule validate ./rules             # schema-check without scanning
+argus rule test ./rules                 # run only your rules, with full evidence
+```
+
+A rule has `id`, `name`, `severity`, `target` and `match`. The `match` block takes
+exactly one combinator (`all`, `any` or `none`) over conditions. Each condition reads
+either a `field` (a dotted path into the asset's parsed data) or `text` (the asset's
+raw text), and applies exactly one operator: `contains`, `not_contains`, `equals`,
+`regex`, `not_regex`, `exists` or `not_exists`. List fields match if any element
+matches, so `field: args` works on an argument vector.
+
+Unlike the benchmark checks, rules are yours — but they behave identically once
+loaded. Rule findings are deterministic, so they **count toward the score and gate
+the exit code** like any built-in check, and they land in their own `custom`
+category so `--category custom` filters to just them.
+
+Validation is strict and unknown keys are rejected, because `severty: high` would
+otherwise leave a rule quietly at its default severity forever. One malformed rule is
+reported and skipped; it never stops the others. Full reference in
+[`docs/rules.md`](docs/rules.md), runnable examples in
+[`examples/rules/`](examples/rules).
+
+### Writing rules with AI
+
+```bash
+export OPENAI_API_KEY=...    # or ANTHROPIC_/MOONSHOT_/DEEPSEEK_API_KEY
+argus rule new "flag MCP servers that pass a credential path as an argument" \
+    --output ./rules/mcp-creds.argus
+```
+
+Providers: `openai`, `anthropic`, `moonshot` (Kimi), `deepseek`. No extra
+dependencies — all four are reached over the standard library.
+
+**What gets sent is your prompt and the rule schema. Nothing else.** No scanned
+configuration, no file contents, no paths, no hostname; you can run it without having
+scanned anything. Argus prints the provider and its processing jurisdiction before
+sending, and Moonshot and DeepSeek are PRC-hosted.
+
+The model writes a **rule**, not a verdict. Its output is data you read, edit and
+commit, and it is validated against the schema before being written, so a bad
+generation is a clear error rather than a rule that silently matches nothing. Review
+what it produces — `argus rule test` exists for exactly that — and treat it as a
+first draft.
 
 ## Configuration
 
@@ -286,7 +302,7 @@ Full derivation in [`docs/scoring.md`](docs/scoring.md).
 
 ## The benchmark
 
-**AASB v1.0** — 67 checks in 9 sections. Check IDs are canonical; CIS-style numbers are
+**AASB v1.0** — 63 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
 derived (`CLAUDE-001` → AASB `1.1`).
 
 | § | Section | Prefix | Checks |
@@ -299,7 +315,6 @@ derived (`CLAUDE-001` → AASB `1.1`).
 | 6 | Instruction Files | `INSTR-` | 5 |
 | 7 | Secrets | `SECRET-` | 5 |
 | 8 | Filesystem | `FS-` | 7 |
-| 9 | LLM-Assisted Review | `LLM-` | 4 |
 
 **Level 1** — basic hygiene: concrete misconfigurations, low false-positive rate,
 remediation that does not materially reduce usability.
