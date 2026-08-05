@@ -454,6 +454,8 @@ def rule_new(
         _fail(str(exc), EXIT_SCANNER_ERROR)
     except RuleError as exc:
         _fail(f"the model did not produce a valid rule — {exc}", EXIT_SCANNER_ERROR)
+    except Exception as exc:  # noqa: BLE001 — a provider fault is an error, not a traceback
+        _fail(f"rule generation failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
 
     if output is None:
         console.print(generated.yaml_text, markup=False, highlight=False)

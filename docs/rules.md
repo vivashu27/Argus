@@ -141,6 +141,20 @@ case-sensitivity from the same flag.
 argument, which is what you want when writing a rule about an argument vector. An
 absent field satisfies negative operators and fails positive ones.
 
+### Searching raw text
+
+`text` has two forms, and the short one is usually what you want:
+
+```yaml
+- text: ignore previous instructions   # shorthand: raw text contains this
+
+- text: true                           # explicit: any operator, on the raw text
+  regex: 'ignore|disregard'
+```
+
+They do not combine. `text: "needle"` already names what to look for, so pairing it
+with an operator is an error rather than one of the two values being quietly dropped.
+
 ## How rule findings behave
 
 Rules are deterministic, so their findings are real ones: they carry evidence, count
@@ -230,8 +244,18 @@ DeepSeek are PRC-hosted.
 The model produces a rule, not a verdict. That distinction matters: its output is
 data you read and commit rather than a judgement you have to trust, and it is
 validated against the schema before being written, so a bad generation is an error
-instead of a rule that silently never matches. The likely failure mode is a
-plausible-looking rule that matches nothing, which is what `argus rule test` is for.
+instead of a rule that silently never matches.
+
+If the first attempt fails validation, the validator's own message is handed back and
+one correction is attempted. That covers the constraints no prompt fully conveys — the
+regex length cap, the id pattern, which of the two `text` forms to use — at the cost of
+a second call only when the first was already going to fail. Two failures report both
+errors and write nothing.
+
+**Still read what it writes.** Passing validation means the rule is well-formed, not
+that it detects what you asked for. The likely failure mode is a plausible rule that
+matches nothing — pointed at the wrong field, or with a regex that never fires. Run
+`argus rule test` against something you know is bad and confirm it actually reports.
 
 API keys are read from environment variables only. `llm.api_key` or similar in
 `argus.yaml` is a hard error, because that file is one Argus itself scans.

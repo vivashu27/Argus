@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from ..core.models import Severity, Target
 from .loader import RuleError, parse_rule
-from .model import COMBINATORS, OPERATORS, TARGET_FIELDS
+from .model import COMBINATORS, MAX_REGEX_LENGTH, OPERATORS, TARGET_FIELDS, Rule
 from .providers import LLMError, build_provider
 
 SYSTEM = f"""\
@@ -38,14 +38,43 @@ Schema — these keys and no others:
   tags:        optional list of strings
   references:  optional list of URLs
 
-A condition has exactly one of 'field' or 'text', and exactly one operator from:
-{', '.join(OPERATORS)}
+A condition has exactly one of 'field' or 'text'.
 
-'field' reads a named value from the asset's parsed data using a dotted path.
-'text' searches the asset's raw text.
+'field' reads a named value from the asset's parsed data using a dotted path, and
+takes exactly one operator from: {', '.join(OPERATORS)}
+
+    - field: command
+      contains: npx
+
+'text' searches the asset's raw text. Write it in one of exactly these two forms:
+
+    - text: some phrase          # shorthand: raw text contains "some phrase"
+
+    - text: true                 # explicit: any operator, on the raw text
+      regex: 'some|pattern'
+
+Never combine a quoted 'text' value with an operator — pick one form or the other.
+
+Hard limits, enforced by the validator:
+  - a regex must be at most {MAX_REGEX_LENGTH} characters. If one alternation would
+    exceed that, split it across several conditions under 'any'.
+  - 'id' must match ^[a-z0-9][a-z0-9._-]{{1,63}}$
 
 Fields available per target:
 {chr(10).join(f"  {t.value:14} {', '.join(sorted(f))}" for t, f in TARGET_FIELDS.items())}
+
+Fields whose names do not say what they hold:
+
+  mcp.tools        list of the server's recovered tool definitions. Use
+                   'tools.description' to search what the model is told about each
+                   tool — that is where tool poisoning lives.
+  mcp.code         where the server's code was resolved to (root, resolved,
+                   package_spec, unpinned). NOT the source text.
+  mcp.raw          the server's entry in .mcp.json exactly as written.
+  skills.body      the Skill's markdown body, after the frontmatter.
+  hooks.script_text  the contents of a hook's resolved script.
+  claude-code.settings  the parsed settings file; use dotted paths such as
+                   'settings.permissions.allow'.
 
 Write the narrowest rule that expresses the request. Prefer a specific field over a
 text search. Do not invent fields that are not listed above.
@@ -112,8 +141,37 @@ def generate_rule(
         f"Here is a complete example of the expected output format:\n\n{EXAMPLE}"
     )
     response = active.complete(SYSTEM, user)
-
     yaml_text = _strip_fences(response.text)
+
+    try:
+        rule = _validate(yaml_text)
+    except RuleError as first:
+        # The schema carries constraints no prompt fully conveys — a length cap, an id
+        # pattern, one of several condition shapes. Handing the validator's own message
+        # back is far more effective than trying to pre-empt every rule in the prompt,
+        # and it costs one call only when the first attempt was already going to fail.
+        repair = (
+            f"{user}\n\nYou produced this document:\n\n{yaml_text}\n\n"
+            f"It was rejected by the validator:\n\n  {first}\n\n"
+            "Return the corrected YAML document only."
+        )
+        response = active.complete(SYSTEM, repair)
+        yaml_text = _strip_fences(response.text)
+        try:
+            rule = _validate(yaml_text)
+        except RuleError as second:
+            raise RuleError(f"{second} — and after one repair attempt: {first}") from second
+
+    return GeneratedRule(
+        yaml_text=yaml_text.rstrip() + "\n",
+        rule_id=rule.rule_id,
+        provider=active.name,
+        model=response.model,
+    )
+
+
+def _validate(yaml_text: str) -> Rule:
+    """Parse and validate generated YAML. Nothing invalid is ever written to disk."""
     if not yaml_text:
         raise RuleError("<generated>: model returned an empty response")
 
@@ -122,17 +180,7 @@ def generate_rule(
     data = parse_yaml_text(yaml_text)
     if data is None:
         raise RuleError("<generated>: model output was not valid YAML")
-
-    # Validating before writing means a bad generation is a clear error rather than
-    # a rule file that silently never matches anything.
-    rule = parse_rule(data, "<generated>")
-
-    return GeneratedRule(
-        yaml_text=yaml_text.rstrip() + "\n",
-        rule_id=rule.rule_id,
-        provider=active.name,
-        model=response.model,
-    )
+    return parse_rule(data, "<generated>")
 
 
 __all__ = ["GeneratedRule", "LLMError", "RuleError", "generate_rule"]

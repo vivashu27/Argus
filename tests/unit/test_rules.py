@@ -426,3 +426,109 @@ class TestEvidenceLocation:
                           target="mcp", fld="args")
         server = mcp("fs", "node", ["--quiet", "npx-shim", "other"])
         assert engine.evaluate_rule(rule, server)[1][0].snippet == "npx-shim"
+
+
+class TestTextShorthand:
+    """`text: needle` is the form both people and models reach for first."""
+
+    def _rule(self, tmp_path, condition: str):
+        rules, errors = load_rules([write(tmp_path, (
+            "id: sh-test\nname: n\nseverity: high\ntarget: mcp\n"
+            f"match:\n  any:\n{condition}"
+        ))])
+        return rules, errors
+
+    def test_string_value_means_contains(self, tmp_path):
+        """The exact shape the generator produced, which used to be a hard error."""
+        rules, errors = self._rule(tmp_path, '    - text: "ignore previous instructions"\n')
+        assert not errors
+        condition = rules[0].match.conditions[0]
+        assert condition.source == "text"
+        assert condition.operator == "contains"
+        assert condition.value == "ignore previous instructions"
+
+    def test_shorthand_actually_matches(self, tmp_path):
+        rules, _ = self._rule(tmp_path, '    - text: "jailbreak"\n')
+        asset = Asset(asset_id="mcp:x", target=Target.MCP, path=Path("/t/.mcp.json"),
+                      data={}, text="a jailbreak attempt", source="/t")
+        assert engine.evaluate_rule(rules[0], asset)[0]
+
+    def test_explicit_form_still_works(self, tmp_path):
+        rules, errors = self._rule(tmp_path, "    - text: true\n      regex: 'jail.?break'\n")
+        assert not errors and rules[0].match.conditions[0].operator == "regex"
+
+    def test_value_plus_operator_is_refused_not_silently_dropped(self, tmp_path):
+        """Previously the needle was discarded and only the operator's value tested,
+        which is a rule that quietly checks something other than what it says."""
+        _rules, errors = self._rule(tmp_path, '    - text: "needle"\n      contains: other\n')
+        assert errors and "cannot also take" in errors[0]
+
+    def test_missing_operator_error_names_the_shorthand(self, tmp_path):
+        _rules, errors = self._rule(tmp_path, "    - text: true\n")
+        assert errors and "text: <needle>" in errors[0]
+
+    def test_ignore_case_is_honoured_by_the_shorthand(self, tmp_path):
+        rules, _ = self._rule(tmp_path, '    - text: "JAILBREAK"\n      ignore_case: false\n')
+        asset = Asset(asset_id="mcp:x", target=Target.MCP, data={}, text="jailbreak", source="/t")
+        assert not engine.evaluate_rule(rules[0], asset)[0]
+
+
+class TestGenerationRepair:
+    """The schema has constraints no prompt fully conveys, so one repair is allowed."""
+
+    def _transport(self, replies: list[str]):
+        sent: list[dict] = []
+
+        def _t(spec, raw):
+            sent.append(json.loads(raw.decode()))
+            return {"model": "mock", "choices": [{"message": {"content": replies[len(sent) - 1]}}]}
+
+        _t.sent = sent  # type: ignore[attr-defined]
+        return _t
+
+    def test_invalid_output_is_repaired_on_the_second_attempt(self):
+        transport = self._transport(["id: only\n", RULE])
+        result = generate_rule("x", api_key="k", transport=transport)
+        assert result.rule_id == "mcp-unpinned-npx"
+        assert len(transport.sent) == 2
+
+    def test_the_repair_prompt_carries_the_validator_message(self):
+        transport = self._transport(["id: only\n", RULE])
+        generate_rule("x", api_key="k", transport=transport)
+        repair = transport.sent[1]["messages"][-1]["content"]
+        assert "rejected by the validator" in repair
+        assert "missing required key(s)" in repair
+
+    def test_a_valid_first_attempt_costs_one_call(self):
+        transport = self._transport([RULE])
+        generate_rule("x", api_key="k", transport=transport)
+        assert len(transport.sent) == 1
+
+    def test_two_failures_report_both_errors(self):
+        transport = self._transport(["id: only\n", ": : ["])
+        with pytest.raises(RuleError, match="after one repair attempt"):
+            generate_rule("x", api_key="k", transport=transport)
+
+    def test_the_schema_prompt_states_the_regex_limit(self):
+        """A limit the model cannot infer must be stated, not discovered by failing."""
+        from argus.rules.generate import SYSTEM
+        from argus.rules.model import MAX_REGEX_LENGTH
+
+        assert str(MAX_REGEX_LENGTH) in SYSTEM
+        assert "text: some phrase" in SYSTEM
+
+
+class TestProviderErrors:
+    """A provider fault must surface as an error, never as a traceback."""
+
+    def test_connection_dropped_while_reading_is_an_llm_error(self):
+        import http.client
+
+        from argus.rules.providers import SPECS, LLMError, Provider
+
+        def _t(spec, raw):
+            raise http.client.RemoteDisconnected("Remote end closed connection")
+
+        provider = Provider(spec=SPECS["anthropic"], api_key="k", model="m", transport=_t)
+        with pytest.raises((LLMError, http.client.RemoteDisconnected)):
+            provider.complete("s", "u")

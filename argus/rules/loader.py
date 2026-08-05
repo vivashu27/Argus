@@ -77,11 +77,39 @@ def _parse_condition(raw: object, path: Path | str) -> Condition:
     field_path = str(raw["field"]) if has_field else None
 
     operators = [op for op in OPERATORS if op in raw]
+
+    # ``text: needle`` is the form everyone reaches for first, because it reads as
+    # "search the raw text for this". Previously it was neither: with no operator it
+    # was a hard error, and with one the needle was silently discarded in favour of
+    # the operator's value. Both are now resolved — the shorthand means ``contains``,
+    # and combining it with an operator is refused rather than half-honoured.
+    inline = raw.get("text")
+    shorthand = str(inline) if has_text and isinstance(inline, str) and inline.strip() else ""
+    if shorthand:
+        if operators:
+            _fail(
+                path,
+                f"'text: {shorthand!r}' already names what to search for, so it cannot also "
+                f"take '{operators[0]}'. Write either 'text: {shorthand!r}' on its own, or "
+                f"'text: true' with '{operators[0]}: ...'",
+            )
+        return Condition(
+            source="text",
+            operator="contains",
+            value=shorthand,
+            ignore_case=bool(raw.get("ignore_case", True)),
+        )
+
     if len(operators) != 1:
+        hint = (
+            ". For a raw-text search write 'text: <needle>', or 'text: true' with an operator"
+            if has_text and not operators
+            else ""
+        )
         _fail(
             path,
             "each condition needs exactly one operator "
-            f"({', '.join(OPERATORS)}); found {len(operators)}",
+            f"({', '.join(OPERATORS)}); found {len(operators)}{hint}",
         )
     operator = operators[0]
     value = "" if operator in ("exists", "not_exists") else str(raw[operator])

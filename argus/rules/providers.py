@@ -20,6 +20,7 @@ API keys are read from environment variables only. They are never accepted from
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import urllib.error
@@ -182,6 +183,15 @@ class Provider:
             raise LLMError(f"{self.name}: response was not valid JSON") from exc
         except TimeoutError as exc:
             raise LLMError(f"{self.name}: timed out after {self.timeout}s") from exc
+        except (OSError, http.client.HTTPException) as exc:
+            # urllib wraps failures from sending the request, but not one that happens
+            # while reading the response: a connection dropped mid-reply surfaces as
+            # http.client.RemoteDisconnected and escapes every handler above it. Left
+            # uncaught it reaches the user as a traceback rather than an error.
+            raise LLMError(
+                f"{self.name}: connection failed — {type(exc).__name__}: {exc}. "
+                "This is usually transient; try again."
+            ) from exc
         return self._parse(payload)
 
 
