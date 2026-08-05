@@ -3,7 +3,7 @@
 > **Generated file.** Produced from the check registry by
 > `python scripts/gen_checks_doc.py > docs/checks.md`. Do not edit by hand.
 
-63 checks across 8 sections.
+70 checks across 8 sections.
 
 ## Index
 
@@ -31,6 +31,13 @@
 | `MCP-010` | 2.10 | 2 | MEDIUM | MCP Security | MCP server exposes excessive tool capabilities |
 | `MCP-011` | 2.11 | 2 | HIGH | MCP Security | MCP tool performs destructive operations without safeguards |
 | `MCP-012` | 2.12 | 2 | MEDIUM | MCP Security | MCP server receives credentials via environment |
+| `MCP-013` | 2.13 | 1 | CRITICAL | MCP Security | MCP tool description carries instructions aimed at the model |
+| `MCP-014` | 2.14 | 1 | HIGH | MCP Security | MCP tool description contains non-rendering characters |
+| `MCP-015` | 2.15 | 2 | HIGH | MCP Security | MCP tool name is claimed by more than one server, or targets another server |
+| `MCP-016` | 2.16 | 1 | CRITICAL | MCP Security | MCP server passes tool input into a shell or evaluator |
+| `MCP-017` | 2.17 | 2 | HIGH | MCP Security | MCP server builds filesystem paths from input without confining them |
+| `MCP-018` | 2.18 | 2 | HIGH | MCP Security | MCP server binds to every network interface |
+| `MCP-019` | 2.19 | 2 | MEDIUM | MCP Security | MCP tool definitions can change after the user approves them |
 | `SKILL-001` | 3.1 | 1 | HIGH | Skills | Skill declares or scripts unrestricted shell execution |
 | `SKILL-002` | 3.2 | 1 | HIGH | Skills | Skill accesses sensitive filesystem paths |
 | `SKILL-003` | 3.3 | 1 | HIGH | Skills | Potential prompt injection in Skill content |
@@ -251,7 +258,7 @@ Claude Code has recorded trust for directories that sit at a filesystem root, a 
 
 ## 2. MCP Security
 
-12 checks — 5 at Level 1, 7 at Level 2.
+19 checks — 8 at Level 1, 11 at Level 2.
 
 ### MCP-001 — MCP server configured from an untrusted source
 
@@ -444,6 +451,118 @@ The server's env block passes credential-shaped values to the subprocess.
 **Compliance mapping.** CWE: CWE-214: Invocation of Process Using Visible Sensitive Information; OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure
 
 **References.** https://modelcontextprotocol.io/docs/concepts/architecture
+
+### MCP-013 — MCP tool description carries instructions aimed at the model
+
+**AASB 2.13** · Level 1 · **CRITICAL** · applies to: mcp
+
+A tool description contains directives to the assistant rather than a description of the tool — concealment instructions, instruction overrides, or a required read of a credential path.
+
+**Detection rationale.** Tool descriptions are supplied to the model as context, with the standing of the tool list itself. A user approving a server sees a sentence about what the tool does; the model sees whatever else was written there. Detection is tiered: a concealment directive or instruction override is reported on sight, while a description that merely names a credential path needs corroboration.
+
+**Security impact.** The server steers the assistant into reading secrets, routing data to an attacker-controlled parameter, or hiding the action from the user — without exploiting any code, and without the user seeing the instruction.
+
+**Remediation.** Remove the directive text from the description. Treat any server whose descriptions address the assistant as untrusted and disconnect it, then review what the assistant did while it was connected.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; OWASP Agentic AI Threats and Mitigations v1.0: T2: Tool Misuse; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-77: Improper Neutralization of Special Elements used in a Command
+
+**References.** https://owasp.org/www-project-agentic-skills-top-10/, https://modelcontextprotocol.io/docs/concepts/tools
+
+### MCP-014 — MCP tool description contains non-rendering characters
+
+**AASB 2.14** · Level 1 · **HIGH** · applies to: mcp
+
+A tool description contains zero-width, Unicode tag, bidirectional or ANSI escape characters, which reach the model but not a human reviewer.
+
+**Detection rationale.** The Unicode tag block U+E0000-U+E007F mirrors ASCII, so a complete instruction can be written in characters that no terminal or approval dialog displays. A description that reads as innocuous can therefore carry a payload the reviewer cannot see at all. There is no legitimate reason for a tool description to contain them.
+
+**Security impact.** An instruction invisible to every human review path is delivered to the model verbatim, defeating description review as a control.
+
+**Remediation.** Reject the server. A description containing invisible characters is not a formatting mistake.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; CWE: CWE-176: Improper Handling of Unicode Encoding
+
+**References.** https://modelcontextprotocol.io/docs/concepts/tools
+
+### MCP-015 — MCP tool name is claimed by more than one server, or targets another server
+
+**AASB 2.15** · Level 2 · **HIGH** · applies to: mcp
+
+Two connected servers expose the same tool name, or a description refers to another server's tools and modifies how they should be called.
+
+**Detection rationale.** The model sees one flat tool list assembled from every connected server, and nothing in the protocol binds a name to an origin. A colliding name makes tool selection ambiguous; a description that redefines another server's tool turns one untrusted server into control over a trusted one.
+
+**Security impact.** Calls intended for a trusted server are answered by an untrusted one, or a trusted tool is invoked with attacker-chosen parameters such as an added recipient on an outbound message.
+
+**Remediation.** Give colliding tools distinct names, or connect only one of the servers. Investigate any server whose descriptions mention another server's tools.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; OWASP Agentic AI Threats and Mitigations v1.0: T2: Tool Misuse; CWE: CWE-1021: Improper Restriction of Rendered UI Layers
+
+**References.** https://modelcontextprotocol.io/docs/concepts/tools
+
+### MCP-016 — MCP server passes tool input into a shell or evaluator
+
+**AASB 2.16** · Level 1 · **CRITICAL** · applies to: mcp
+
+Server code builds a shell command or evaluated expression from interpolated input reachable through a tool parameter.
+
+**Detection rationale.** Every tool parameter is attacker-reachable: the model chooses the value, and the model can be steered by injected text in any document it reads. A shell sink with an interpolated argument is therefore remote code execution reachable from content, not just from a malicious user. Constant arguments and the argument-vector form of subprocess are not reported.
+
+**Security impact.** Code execution as the user running the agent, from any content the model can be induced to read.
+
+**Remediation.** Pass an argument vector instead of a command string — subprocess without shell=True, or execFile in place of exec — and validate parameters against an allow-list. Never evaluate a parameter as code.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM05: Improper Output Handling; OWASP Agentic AI Threats and Mitigations v1.0: T2: Tool Misuse; MITRE ATLAS: AML.T0053: LLM Plugin Compromise; CWE: CWE-78: OS Command Injection
+
+**References.** https://cwe.mitre.org/data/definitions/78.html, https://modelcontextprotocol.io/docs/concepts/tools
+
+### MCP-017 — MCP server builds filesystem paths from input without confining them
+
+**AASB 2.17** · Level 2 · **HIGH** · applies to: mcp
+
+Server code opens or writes a path built from interpolated input, and contains no idiom that confines the result to an intended directory.
+
+**Detection rationale.** A filesystem tool that joins a caller-supplied segment onto a base directory escapes that directory with '..' unless the joined result is resolved and checked. Any file containing a containment idiom — resolve, realpath, commonpath, a startswith check — is treated as having addressed this, so the check reports servers that never confine paths rather than every server that opens a file.
+
+**Security impact.** A tool scoped to a project directory reads or writes anywhere the agent's user can, including SSH keys and cloud credentials.
+
+**Remediation.** Resolve the joined path and verify it is still inside the intended root before opening it. Reject the request otherwise.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-22: Improper Limitation of a Pathname to a Restricted Directory
+
+**References.** https://cwe.mitre.org/data/definitions/22.html
+
+### MCP-018 — MCP server binds to every network interface
+
+**AASB 2.18** · Level 2 · **HIGH** · applies to: mcp
+
+Server code binds 0.0.0.0 or ::, exposing it beyond the local machine.
+
+**Detection rationale.** MCP mandates no authentication. A server written for local stdio use that binds every interface is reachable by anyone who can route to the host, with the same tools the agent has. Whether the file shows any authentication at all decides the confidence of this finding.
+
+**Security impact.** Anyone able to reach the port invokes the server's tools directly, with the privileges of the account running it.
+
+**Remediation.** Bind 127.0.0.1 for local use. If remote access is required, put authentication in front of it and restrict the source range.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-306: Missing Authentication for Critical Function, CWE-668: Exposure of Resource to Wrong Sphere
+
+**References.** https://modelcontextprotocol.io/docs/concepts/transports
+
+### MCP-019 — MCP tool definitions can change after the user approves them
+
+**AASB 2.19** · Level 2 · **MEDIUM** · applies to: mcp
+
+The server resolves to a new version at every launch, or its code is writable by the current user, so approved tool definitions can change silently.
+
+**Detection rationale.** A rug pull is a tool that behaves as described until trust is established, then changes. Approval happens once, against the definitions present that day. This reports the conditions that make such a change silent: an unpinned package fetched fresh at each launch, or server code the user's own account can rewrite. Detecting an actual change requires comparing against recorded definitions, which needs a pinned version to compare against in the first place.
+
+**Security impact.** Tool descriptions and behaviour differ from what the user reviewed, with no prompt and no visible difference in configuration.
+
+**Remediation.** Pin the server to an exact version and install it rather than fetching at launch. Re-review tool descriptions whenever that pin is raised.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM03: Supply Chain; OWASP Agentic AI Threats and Mitigations v1.0: T2: Tool Misuse; CWE: CWE-494: Download of Code Without Integrity Check
+
+**References.** https://modelcontextprotocol.io/docs/concepts/tools
 
 
 ---

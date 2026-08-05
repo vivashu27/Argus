@@ -15,6 +15,7 @@ from typing import Any
 
 from ..core.models import Asset, Target
 from ..core.safe_io import is_readable, read_json
+from . import mcp_code
 from . import platform as plat
 from .base import DiscoveryContext
 
@@ -125,7 +126,12 @@ def discover(context: DiscoveryContext) -> list[Asset]:
                     _from_mapping(data.get("mcpServers"), settings_path, "claude-code", context)
                 )
 
-    return _dedupe(assets)
+    servers = _dedupe(assets)
+
+    # Configuration says how to launch a server; the risks live in what gets launched.
+    # Resolution never executes anything — the command is parsed as data.
+    mcp_code.enrich(servers, context)
+    return servers
 
 
 def _dedupe(assets: list[Asset]) -> list[Asset]:

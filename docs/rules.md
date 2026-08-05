@@ -47,13 +47,18 @@ that asset's parsed data.
 
 | Target | Fields |
 |---|---|
-| `mcp` | `name`, `command`, `args`, `env`, `url`, `transport`, `scope` |
+| `mcp` | `name`, `command`, `args`, `env`, `url`, `transport`, `scope`, `tools`, `code` |
 | `skills` | `name`, `scope`, `directory`, `allowed_tools`, `body` |
 | `plugins` | `name`, `marketplace`, `trust`, `directory`, `manifest` |
 | `hooks` | `event`, `matcher`, `command`, `type`, `scope`, `script_text` |
 | `claude-code` | `settings` (dotted, e.g. `settings.permissions.allow`), `scope` |
 | `instructions` | `scope`, `name` |
 | `filesystem` | `kind`, `mode`, `readable`, `category`, `description` |
+
+An MCP server also carries what Argus recovered from its implementation: `tools` is a
+list of `{name, description, path, line}`, so `field: tools.description` matches every
+recovered tool description, and `code` holds the resolution result (`root`, `resolved`,
+`package_spec`, `unpinned`).
 
 Every target also supports `text`, which searches the asset's raw text rather than a
 named field. Prefer a specific field where one exists — it is faster and far less
@@ -185,7 +190,7 @@ argus rule test ./rules                     # run only rules, full evidence
 tree of them are the same flag. Directories are searched to depth 4 for `*.argus`.
 
 `--rules-only` suppresses the built-in checks and reports your rules alone — useful
-when you are iterating on a rule and do not want 63 benchmark findings in the way, or
+when you are iterating on a rule and do not want 70 benchmark findings in the way, or
 when a policy repo owns its own definition of a pass. Discovery still runs in full,
 because rules match against discovered assets. The score is then computed over your
 rules only, so an 80/100 from `--rules-only` is not comparable to an ordinary scan.

@@ -183,6 +183,11 @@ class Asset:
     source: str = ""
     is_fixture: bool = False
 
+    #: Source belonging to this asset, as ``(path, text)`` pairs. Populated only where
+    #: an asset has code behind it — an MCP server resolved to its implementation on
+    #: disk. Never serialised: a report carries evidence drawn from this, not the code.
+    code_files: list[tuple[Path, str]] = field(default_factory=list)
+
     #: ``text`` is the file at ``path`` byte for byte, so an offset into it is a real
     #: offset into that file. False where ``text`` is synthesised for the analyzers —
     #: a re-serialised JSON config, or a hook's command joined to its script — because

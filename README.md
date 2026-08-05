@@ -315,13 +315,13 @@ Full derivation in [`docs/scoring.md`](docs/scoring.md).
 
 ## The benchmark
 
-**AASB v1.0** — 63 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
+**AASB v1.0** — 70 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
 derived (`CLAUDE-001` → AASB `1.1`).
 
 | § | Section | Prefix | Checks |
 |---|---|---|---|
 | 1 | Claude Configuration | `CLAUDE-` | 10 |
-| 2 | MCP Security | `MCP-` | 12 |
+| 2 | MCP Security | `MCP-` | 19 |
 | 3 | Skills | `SKILL-` | 10 |
 | 4 | Plugins | `PLUGIN-` | 8 |
 | 5 | Hooks | `HOOK-` | 6 |
@@ -335,6 +335,29 @@ remediation that does not materially reduce usability.
 heuristic/contextual risk.
 
 Reference: [`docs/checks.md`](docs/checks.md) and [`docs/benchmark.md`](docs/benchmark.md).
+
+### MCP server code analysis
+
+Section 2 audits more than `.mcp.json`. `MCP-013` … `MCP-019` resolve a server's
+`command` and `args` to the code already installed on the machine — an interpreter's
+entry point, `python -m` against the project venv, or a package spec against
+`node_modules` — and audit what actually runs:
+
+| Attack class | Check |
+|---|---|
+| Tool poisoning — instructions hidden in a tool description | `MCP-013` |
+| Invisible payloads (Unicode tag block, zero-width, ANSI) | `MCP-014` |
+| Tool shadowing and cross-server instructions | `MCP-015` |
+| RCE — tool input reaching a shell or evaluator | `MCP-016` |
+| Path traversal out of the intended directory | `MCP-017` |
+| Unauthenticated exposure on every interface | `MCP-018` |
+| Rug pull — definitions that change after approval | `MCP-019` |
+
+A tool description is model-visible context rather than documentation, and every tool
+parameter is attacker-reachable, so both are treated as untrusted. The command string is
+parsed as data and **never executed** — Argus still never starts a server, which means
+tool extraction is best-effort and a server it cannot locate reports `MANUAL` naming the
+reason, never `PASS`. See [`docs/benchmark.md`](docs/benchmark.md#mcp-server-code-analysis).
 
 ---
 

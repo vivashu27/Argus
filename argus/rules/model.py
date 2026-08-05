@@ -26,7 +26,9 @@ SOURCES = ("field", "text")
 #: Used to catch the most common way a rule goes wrong: a valid schema pointed at a
 #: field the target does not have, which validates cleanly and then never matches.
 TARGET_FIELDS: dict[Target, frozenset[str]] = {
-    Target.MCP: frozenset({"name", "command", "args", "env", "url", "transport", "scope", "raw"}),
+    Target.MCP: frozenset(
+        {"name", "command", "args", "env", "url", "transport", "scope", "raw", "code", "tools"}
+    ),
     Target.SKILLS: frozenset(
         {"name", "scope", "directory", "frontmatter", "allowed_tools", "body", "scripts"}
     ),

@@ -4,7 +4,7 @@
 > It is **not** a CIS Benchmark, and Argus is not affiliated with or certified by CIS,
 > Anthropic, OpenAI, or any other organization.
 
-A CIS-inspired security configuration baseline for AI-agent environments: 63 checks in
+A CIS-inspired security configuration baseline for AI-agent environments: 70 checks in
 8 sections, each with real detection logic and tests.
 
 ## Numbering
@@ -19,7 +19,7 @@ AASB number = <category section>.<numeric part of the check ID>
 | § | Section | Slug | Prefix | Checks |
 |:-:|---|---|---|---:|
 | 1 | Claude Configuration | `claude` | `CLAUDE-` | 10 |
-| 2 | MCP Security | `mcp` | `MCP-` | 12 |
+| 2 | MCP Security | `mcp` | `MCP-` | 19 |
 | 3 | Skills | `skills` | `SKILL-` | 10 |
 | 4 | Plugins | `plugins` | `PLUGIN-` | 8 |
 | 5 | Hooks | `hooks` | `HOOK-` | 6 |
@@ -89,7 +89,53 @@ and one negative test. The benchmark was not padded to hit a count.
 
 **MANUAL over guessing.** Where the answer needs a runtime handshake — `MCP-010` (tool
 surface) and `MCP-011` (destructive capability) — the result is `MANUAL` with an
-explanation, never an assumed `PASS`.
+explanation, never an assumed `PASS`. The same rule governs every check in section 2
+that reads server code: a server Argus could not locate reports `MANUAL` naming the
+reason, because a server that cannot be read is not a server that is clean.
+
+## MCP server code analysis
+
+`MCP-001` … `MCP-012` audit how a server is *configured*. `MCP-013` … `MCP-019` audit
+what that configuration launches, which is where the published MCP attack classes live.
+
+Two properties of the protocol make this a distinct problem. A tool's **description is
+model-visible context**, not documentation — text placed there reaches the model with
+the standing of the tool list, while the user sees a sentence about what the tool does.
+And **every tool parameter is attacker-reachable**, because the model chooses the values
+and injected text in any document the model reads can steer that choice.
+
+| Attack class | Check |
+|---|---|
+| Tool poisoning — hidden instructions in a description | `MCP-013` |
+| Invisible payloads (Unicode tag block, zero-width, ANSI) | `MCP-014` |
+| Tool shadowing and cross-server instructions | `MCP-015` |
+| Remote code execution via shell injection | `MCP-016` |
+| Path traversal out of the intended directory | `MCP-017` |
+| Unauthenticated exposure on all interfaces | `MCP-018` |
+| Rug pull — definitions changing after approval | `MCP-019` |
+
+### How server code is located
+
+Argus **never starts a server**, so it cannot call `tools/list`. The `command` and
+`args` are parsed as data — never passed to a shell — and mapped onto code already on
+disk: an interpreter's entry-point argument, `python -m` against the project venv and
+site-packages, or a package runner's spec against `node_modules`, the npx cache and
+global roots. Every file is then read through the same size caps, symlink rules and
+depth limits as the rest of discovery, and the resolved root is added to `scan_roots`
+so the report discloses what was read.
+
+Two consequences are worth stating plainly:
+
+**Tool extraction is best-effort.** Definitions are recovered from source — Python
+`@mcp.tool` decorators and `Tool(...)` constructions, TypeScript `server.tool` calls and
+tool-list literals. A server that assembles its tool list at runtime yields fewer tools
+than it exposes, so the checks report what was recovered rather than implying the list
+is complete.
+
+**An unresolvable server is reported, not passed.** A containerised server, or an
+unpinned package that npx fetches at launch, has no local code to read. Those report
+`MANUAL` with the reason — and for the npx case that reason *is* the finding, because
+code fetched at launch cannot be reviewed before it runs.
 
 **Checks must be disjoint.** Overlapping checks double-count in the score and waste
 reviewer time. Notable separations:
@@ -98,6 +144,9 @@ reviewer time. Notable separations:
 |---|---|
 | `MCP-002` / `MCP-007` | Command *is* a shell vs. arguments contain shell metacharacters |
 | `MCP-005` / `MCP-010` | Declared privilege scope vs. number of exposed tools |
+| `MCP-007` / `MCP-016` | Shell metacharacters in the *launch arguments* vs. a shell sink inside the *server's code* |
+| `MCP-009` / `MCP-019` | Configuration carries no integrity metadata vs. the resolved package can change between launches |
+| `MCP-013` / `MCP-014` / `MCP-015` | Visible instructions in a description vs. invisible characters vs. reaching another server's tools |
 | `SKILL-001` / `SKILL-008` / `SKILL-010` | Shell grant vs. specific dangerous strings vs. overall grant breadth |
 | `SKILL-002` / `SKILL-009` | Reference anywhere in the Skill vs. access inside an executable script |
 | `FS-005` / `FS-007` | Read exposure vs. write exposure |

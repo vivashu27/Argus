@@ -11,6 +11,7 @@ from . import (  # noqa: F401  (imported for registration side effects)
     hook_checks,
     instruction_checks,
     mcp_checks,
+    mcp_code_checks,
     plugin_checks,
     secret_checks,
     skill_checks,
@@ -19,6 +20,7 @@ from . import (  # noqa: F401  (imported for registration side effects)
 __all__ = [
     "claude_checks",
     "mcp_checks",
+    "mcp_code_checks",
     "skill_checks",
     "plugin_checks",
     "hook_checks",
