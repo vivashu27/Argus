@@ -4,7 +4,7 @@
 > It is **not** a CIS Benchmark, and Argus is not affiliated with or certified by CIS,
 > Anthropic, OpenAI, or any other organization.
 
-A CIS-inspired security configuration baseline for AI-agent environments: 70 checks in
+A CIS-inspired security configuration baseline for AI-agent environments: 71 checks in
 8 sections, each with real detection logic and tests.
 
 ## Numbering
@@ -19,7 +19,7 @@ AASB number = <category section>.<numeric part of the check ID>
 | § | Section | Slug | Prefix | Checks |
 |:-:|---|---|---|---:|
 | 1 | Claude Configuration | `claude` | `CLAUDE-` | 10 |
-| 2 | MCP Security | `mcp` | `MCP-` | 19 |
+| 2 | MCP Security | `mcp` | `MCP-` | 20 |
 | 3 | Skills | `skills` | `SKILL-` | 10 |
 | 4 | Plugins | `plugins` | `PLUGIN-` | 8 |
 | 5 | Hooks | `hooks` | `HOOK-` | 6 |
@@ -113,6 +113,7 @@ and injected text in any document the model reads can steer that choice.
 | Path traversal out of the intended directory | `MCP-017` |
 | Unauthenticated exposure on all interfaces | `MCP-018` |
 | Rug pull — definitions changing after approval | `MCP-019` |
+| Hardcoded credentials in server source | `MCP-020` |
 
 ### How server code is located
 

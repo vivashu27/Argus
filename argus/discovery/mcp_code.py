@@ -92,16 +92,25 @@ def _basename(command: str) -> str:
 
 
 def _package_root(start: Path, ceiling: int = 4) -> Path:
-    """Walk up to the directory that owns this file — the package, not the source dir."""
-    current = start if start.is_dir() else start.parent
+    """Walk up to the directory that owns this file — the package, not the source dir.
+
+    The walk only continues past a conventional build or source subdirectory. That is
+    the difference between ``node_modules/pkg/dist/index.js``, where the package root
+    genuinely is two levels up, and ``challenges/easy/challenge2/server.py``, where the
+    nearest manifest belongs to a repository that merely contains the server. Without
+    that condition a server anywhere inside a monorepo resolves to the whole monorepo,
+    and every finding in it is attributed to that one server.
+    """
+    base = start if start.is_dir() else start.parent
+    current = base
     for _ in range(ceiling):
         for marker in ("package.json", "pyproject.toml", "setup.py"):
             if (current / marker).is_file():
                 return current
-        if current.parent == current:
+        if current.parent == current or current.name not in BUILD_DIRS:
             break
         current = current.parent
-    return start if start.is_dir() else start.parent
+    return base
 
 
 def _node_module_roots(project_root: Path, home: Path, user_scope: bool) -> list[Path]:

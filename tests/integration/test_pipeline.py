@@ -712,3 +712,30 @@ class TestMcpServerCode:
         finding = found[("MCP-016", "mcp:n")]
         assert finding.status is Status.WARN
         assert finding.severity is Severity.INFO
+
+    def test_hardcoded_token_in_server_source_is_reported(self, tmp_path):
+        """MCP-006 reads the config block; a credential written into the server's own
+        source never appears there. DVMCP challenge 7 is exactly this shape."""
+        jwt = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6"
+               "IkFDTUUiLCJpYXQiOjE2NTE4ODQ4MDB9.5TxfEAVbZRGbKnXaL9Lrx9NqXSNFw2ac4FDzPHvRzSQ")
+        found = self._run(
+            tmp_path,
+            {"t": {"command": "npx", "args": ["srv@1.0.0"]}},
+            {"srv": f'const TOKENS = {{ acme: "{jwt}" }};\n'},
+        )
+        finding = found[("MCP-020", "mcp:t")]
+        assert finding.status is Status.FAIL
+        assert jwt not in str(finding.evidence[0].snippet), "the token itself must be redacted"
+
+    def test_type_annotations_are_not_reported_as_credentials(self, tmp_path):
+        """`auth = AuthConfig(...)` is ordinary code. The entropy heuristic behind
+        MEDIUM confidence is calibrated for config files and would make this noise."""
+        source = (
+            "from typing import Optional\n"
+            "auth = AuthConfig(headers=header_dict, cookies=cookie_dict)\n"
+            "def f(auth: Optional[AuthConfig] = None): ...\n"
+        )
+        found = self._run(
+            tmp_path, {"t": {"command": "npx", "args": ["srv@1.0.0"]}}, {"srv": source}
+        )
+        assert found[("MCP-020", "mcp:t")].status is Status.PASS

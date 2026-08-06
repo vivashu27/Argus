@@ -28,8 +28,10 @@ MAX_DESCRIPTION = 4000
 
 #: ``@mcp.tool()`` / ``@server.tool(...)`` followed by the function it decorates. The
 #: docstring becomes the description, which is exactly how the Python SDK builds it.
+#: Resources and prompts are matched too: their descriptions reach the model through
+#: the same channel, so a directive in one is worth exactly as much to an attacker.
 _PY_DECORATED = re.compile(
-    r"@(?P<obj>\w+)\.tool\s*\((?P<dargs>[^)]{0,400})\)\s*"
+    r"@(?P<obj>\w+)\.(?P<kind>tool|resource|prompt)\s*\((?P<dargs>[^)]{0,400})\)\s*"
     r"(?:@[\w.]+\s*(?:\([^)]{0,200}\))?\s*)*"
     r"(?:async\s+)?def\s+(?P<func>\w+)\s*\([^)]{0,2000}\)[^:]{0,200}:\s*"
     r'(?:(?P<q>"""|\'\'\')(?P<doc>.{0,4000}?)(?P=q))?',
@@ -49,7 +51,7 @@ _NAME_DESC = re.compile(
 #: ``server.tool("name", "description", schema, handler)`` — the positional form used
 #: by the TypeScript SDK's high-level helper.
 _JS_POSITIONAL = re.compile(
-    r"\.(?:tool|registerTool)\s*\(\s*(?P<nq>[\"'`])(?P<name>[^\"'`\n]{1,80})(?P=nq)\s*,\s*"
+    r"\.(?:tool|resource|prompt|registerTool|registerResource|registerPrompt)\s*\(\s*(?P<nq>[\"'`])(?P<name>[^\"'`\n]{1,80})(?P=nq)\s*,\s*"
     r"(?P<dq>[\"'`])(?P<desc>.{0,4000}?)(?P=dq)",
     re.S,
 )

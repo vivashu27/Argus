@@ -3,7 +3,7 @@
 > **Generated file.** Produced from the check registry by
 > `python scripts/gen_checks_doc.py > docs/checks.md`. Do not edit by hand.
 
-70 checks across 8 sections.
+71 checks across 8 sections.
 
 ## Index
 
@@ -38,6 +38,7 @@
 | `MCP-017` | 2.17 | 2 | HIGH | MCP Security | MCP server builds filesystem paths from input without confining them |
 | `MCP-018` | 2.18 | 2 | HIGH | MCP Security | MCP server binds to every network interface |
 | `MCP-019` | 2.19 | 2 | MEDIUM | MCP Security | MCP tool definitions can change after the user approves them |
+| `MCP-020` | 2.20 | 1 | CRITICAL | MCP Security | MCP server code contains hardcoded credentials |
 | `SKILL-001` | 3.1 | 1 | HIGH | Skills | Skill declares or scripts unrestricted shell execution |
 | `SKILL-002` | 3.2 | 1 | HIGH | Skills | Skill accesses sensitive filesystem paths |
 | `SKILL-003` | 3.3 | 1 | HIGH | Skills | Potential prompt injection in Skill content |
@@ -258,7 +259,7 @@ Claude Code has recorded trust for directories that sit at a filesystem root, a 
 
 ## 2. MCP Security
 
-19 checks — 8 at Level 1, 11 at Level 2.
+20 checks — 9 at Level 1, 11 at Level 2.
 
 ### MCP-001 — MCP server configured from an untrusted source
 
@@ -563,6 +564,22 @@ The server resolves to a new version at every launch, or its code is writable by
 **Compliance mapping.** OWASP LLM Top 10 2025: LLM03: Supply Chain; OWASP Agentic AI Threats and Mitigations v1.0: T2: Tool Misuse; CWE: CWE-494: Download of Code Without Integrity Check
 
 **References.** https://modelcontextprotocol.io/docs/concepts/tools
+
+### MCP-020 — MCP server code contains hardcoded credentials
+
+**AASB 2.20** · Level 1 · **CRITICAL** · applies to: mcp
+
+Credential material is embedded in the server's own source rather than supplied by the environment at launch.
+
+**Detection rationale.** MCP-006 reads the server's configuration block. A credential written into the implementation never appears there, so it passed unremarked while the same value in .mcp.json would have failed. The server's source is already read for the other checks in this section; scanning it costs nothing.
+
+**Security impact.** The credential is readable by anyone with the file, travels with the package, and is exposed to every tool the agent can reach.
+
+**Remediation.** Move the value to an environment variable read at startup, rotate it, and purge it from version control history.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure; CWE: CWE-798: Use of Hard-coded Credentials
+
+**References.** https://cwe.mitre.org/data/definitions/798.html
 
 
 ---

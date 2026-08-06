@@ -103,6 +103,27 @@ def _excerpt(text: str, start: int, end: int) -> str:
     return truncate(text[max(0, start - 20) : end + 80], 160)
 
 
+#: Lines either side of a sink searched for a containment idiom. Wide enough to cover
+#: the function a path is validated in, narrow enough that an unrelated check
+#: elsewhere in the file does not vouch for it.
+CONTAINMENT_LINES = 25
+
+
+def _neighbourhood(text: str, offset: int) -> str:
+    """The lines surrounding an offset, where a guard for it would plausibly live.
+
+    Commented lines are dropped. A commented-out guard is not a guard — vulnerable
+    code routinely carries the secure version alongside it as documentation, and
+    accepting that would let the code vouch for the very check it omits.
+    """
+    lines = text.splitlines()
+    index = text.count("\n", 0, offset)
+    window = lines[max(0, index - CONTAINMENT_LINES) : index + CONTAINMENT_LINES]
+    return "\n".join(
+        line for line in window if not line.lstrip().startswith(("#", "//", "*", "/*"))
+    )
+
+
 def _is_comment(text: str, offset: int) -> bool:
     """Whether the match sits on a commented-out line.
 
@@ -160,11 +181,11 @@ def shell_sinks(text: str) -> list[SinkMatch]:
 def path_sinks(text: str) -> list[SinkMatch]:
     """Filesystem sinks reached by interpolated input, where nothing confines the path.
 
-    A file containing any containment idiom is treated as having addressed traversal;
-    this reports the servers that never do, not every server that opens a file.
+    Containment is looked for near the sink rather than anywhere in the file. A server
+    that confines one path and not another would otherwise clear itself entirely: a
+    single ``startswith`` in an unrelated function was enough to suppress every sink in
+    the file, which is the shape of a real vulnerable server rather than a rare one.
     """
-    if _CONTAINMENT.search(text):
-        return []
     out: list[SinkMatch] = []
     for sink_id, expression, description in _PATH_COMPILED:
         for match in expression.finditer(text):
@@ -172,6 +193,8 @@ def path_sinks(text: str) -> list[SinkMatch]:
                 continue
             window = text[match.end() : match.end() + WINDOW]
             if not _INTERPOLATION.search(window.split(")")[0] or window):
+                continue
+            if _CONTAINMENT.search(_neighbourhood(text, match.start())):
                 continue
             out.append(
                 SinkMatch(

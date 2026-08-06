@@ -315,13 +315,13 @@ Full derivation in [`docs/scoring.md`](docs/scoring.md).
 
 ## The benchmark
 
-**AASB v1.0** — 70 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
+**AASB v1.0** — 71 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
 derived (`CLAUDE-001` → AASB `1.1`).
 
 | § | Section | Prefix | Checks |
 |---|---|---|---|
 | 1 | Claude Configuration | `CLAUDE-` | 10 |
-| 2 | MCP Security | `MCP-` | 19 |
+| 2 | MCP Security | `MCP-` | 20 |
 | 3 | Skills | `SKILL-` | 10 |
 | 4 | Plugins | `PLUGIN-` | 8 |
 | 5 | Hooks | `HOOK-` | 6 |
@@ -352,6 +352,7 @@ entry point, `python -m` against the project venv, or a package spec against
 | Path traversal out of the intended directory | `MCP-017` |
 | Unauthenticated exposure on every interface | `MCP-018` |
 | Rug pull — definitions that change after approval | `MCP-019` |
+| Hardcoded credentials in the server source | `MCP-020` |
 
 A tool description is model-visible context rather than documentation, and every tool
 parameter is attacker-reachable, so both are treated as untrusted. The command string is

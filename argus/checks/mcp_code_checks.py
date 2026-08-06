@@ -20,7 +20,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from ..analysis import code_sinks
+from ..analysis import code_sinks, secrets
 from ..analysis.mcp_tools import (
     concealed_characters,
     is_poisoned,
@@ -727,5 +727,93 @@ class ToolDefinitionMutability(Check):
             else:
                 findings.append(
                     self.manual(asset.asset_id, _unresolved_detail(asset), confidence=Confidence.LOW)
+                )
+        return findings
+
+
+@register
+class ServerEmbeddedSecrets(Check):
+    meta = CheckMeta(
+        check_id="MCP-020",
+        title="MCP server code contains hardcoded credentials",
+        description=(
+            "Credential material is embedded in the server's own source rather than "
+            "supplied by the environment at launch."
+        ),
+        category=Category.MCP,
+        severity=Severity.CRITICAL,
+        aasb_level=1,
+        applies_to=MCP_ONLY,
+        rationale=(
+            "MCP-006 reads the server's configuration block. A credential written into "
+            "the implementation never appears there, so it passed unremarked while the "
+            "same value in .mcp.json would have failed. The server's source is already "
+            "read for the other checks in this section; scanning it costs nothing."
+        ),
+        security_impact=(
+            "The credential is readable by anyone with the file, travels with the "
+            "package, and is exposed to every tool the agent can reach."
+        ),
+        remediation=(
+            "Move the value to an environment variable read at startup, rotate it, and "
+            "purge it from version control history."
+        ),
+        references=("https://cwe.mitre.org/data/definitions/798.html",),
+        compliance=(
+            ("OWASP LLM Top 10 2025", "LLM02: Sensitive Information Disclosure"),
+            ("CWE", "CWE-798: Use of Hard-coded Credentials"),
+        ),
+    )
+
+    def run(self, context: CheckContext) -> list[Finding]:
+        assets = context.by_target(Target.MCP)
+        if not assets:
+            return self.no_assets("MCP servers")
+
+        findings: list[Finding] = []
+        for asset in assets:
+            if not (asset.data.get("code") or {}).get("resolved"):
+                findings.append(
+                    self.manual(asset.asset_id, _unresolved_detail(asset), confidence=Confidence.LOW)
+                )
+                continue
+
+            evidence: list[Evidence] = []
+            total = 0
+            for path, text in _code_files(asset):
+                for match in secrets.scan_text(text):
+                    # Only pattern-identified credentials. The entropy heuristic that
+                    # backs MEDIUM confidence is calibrated for configuration files,
+                    # where `auth: <value>` names a secret; in source the same shape is
+                    # ordinary code — `auth = AuthConfig(...)` — and reporting it would
+                    # make this check noise on every Python server.
+                    if match.confidence != "HIGH":
+                        continue
+                    total += 1
+                    if len(evidence) < 10:
+                        evidence.append(
+                            self.evidence(
+                                path=path,
+                                line=match.line,
+                                # Already redacted by the scanner; nothing downstream
+                                # re-redacts, so the raw value must never land here.
+                                snippet=match.redacted,
+                                reason=f"{match.description} [{match.kind}]",
+                            )
+                        )
+            if total:
+                findings.append(
+                    self.fail(
+                        asset.asset_id,
+                        f"{total} hardcoded credential(s) in the server's source.",
+                        evidence,
+                    )
+                )
+            else:
+                findings.append(
+                    self.ok(
+                        asset.asset_id,
+                        f"No credentials in {asset.data['code'].get('file_count')} source file(s).",
+                    )
                 )
         return findings

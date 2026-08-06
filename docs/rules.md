@@ -211,7 +211,7 @@ argus rule test ./rules                     # run only rules, full evidence
 tree of them are the same flag. Directories are searched to depth 4 for `*.argus`.
 
 `--rules-only` suppresses the built-in checks and reports your rules alone — useful
-when you are iterating on a rule and do not want 70 benchmark findings in the way, or
+when you are iterating on a rule and do not want 71 benchmark findings in the way, or
 when a policy repo owns its own definition of a pass. Discovery still runs in full,
 because rules match against discovered assets. The score is then computed over your
 rules only, so an 80/100 from `--rules-only` is not comparable to an ordinary scan.
