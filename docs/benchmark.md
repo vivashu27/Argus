@@ -132,6 +132,12 @@ tool-list literals. A server that assembles its tool list at runtime yields fewe
 than it exposes, so the checks report what was recovered rather than implying the list
 is complete.
 
+For a decorated Python function the **docstring is the description**, because that is
+how the SDK builds it. The whole docstring is analysed, not its summary line: an
+`Args:`/`Returns:` block is exactly the padding a payload hides behind, so a directive
+placed after several hundred characters of ordinary documentation is still reported.
+Descriptions are analysed up to 4,000 characters.
+
 **An unresolvable server is reported, not passed.** A containerised server, or an
 unpinned package that npx fetches at launch, has no local code to read. Those report
 `MANUAL` with the reason — and for the npx case that reason *is* the finding, because

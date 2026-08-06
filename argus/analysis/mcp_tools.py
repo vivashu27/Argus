@@ -68,7 +68,14 @@ class ToolDef:
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": truncate(self.description, 600),
+            # The description is carried whole, not display-truncated. This dict is
+            # what the poisoning checks and custom rules actually read, and a payload
+            # placed after a realistic Args:/Returns: block sits well past any short
+            # display cap — truncating here would put it outside the analysis window
+            # and silently hide exactly the case worth catching. Whitespace is left
+            # intact too, since a long blank run is itself a signal. Report size is
+            # bounded where it matters, at the evidence snippet.
+            "description": self.description,
             "path": str(self.path),
             "line": self.line,
             "how": self.how,
