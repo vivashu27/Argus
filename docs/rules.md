@@ -177,7 +177,14 @@ terminal and Markdown, `line` in JSON/YAML/CSV, and `region.startLine` in SARIF,
 GitHub Security annotates the right line. The snippet is a window centred on the match
 rather than the head of the field, which matters once a rule fires deep in a long file.
 
-A line is reported only where it is real. For Skills, instruction files and Claude
+**Matches inside a recovered record point at that record's file.** An MCP server's
+`tools` are recovered from source, so a `field: tools.description` match reports the
+`.py` or `.js` file and the line the text sits on — not the `.mcp.json` that merely
+names the server. Records publish a per-field start line as `<field>_line`, so a
+directive buried after a long `Args:` block resolves to its own line rather than to
+the top of the function.
+
+For everything else, a line is reported only where it is real. For Skills, instruction files and Claude
 config, the scanned text is the file byte for byte, so an offset into it is an offset
 into the file — including the frontmatter, so a `field: body` match still reports its
 true line in `SKILL.md`. For **MCP servers, plugins and hooks** the scanned text is

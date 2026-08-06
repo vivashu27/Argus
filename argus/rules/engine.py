@@ -11,6 +11,7 @@ any argument matches. That behaviour is what a rule author expects when they wri
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from ..analysis.redaction import truncate
@@ -25,47 +26,66 @@ from ..core.models import (
 from .model import MAX_MATCH_INPUT, Condition, Rule
 
 
-def _lookup(asset: Asset, path: str) -> list[str]:
-    """Resolve a dotted field path to the string values it names.
+@dataclass(frozen=True)
+class _Value:
+    """One string a condition can be tested against, and where it came from.
+
+    ``origin`` is the nested record the value was read out of, when that record
+    carries its own provenance. An MCP server's ``tools`` are recovered from source
+    files, so a match in ``tools.description`` belongs to a line of a ``.py`` or
+    ``.js`` file — not to the ``.mcp.json`` that merely names the server.
+    """
+
+    text: str
+    origin: dict[str, Any] | None = None
+
+
+def _flatten(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, int, float, bool)):
+        return [str(value)]
+    if isinstance(value, list):
+        return [s for item in value for s in _flatten(item)]
+    if isinstance(value, dict):
+        return [f"{k}={v}" for k, v in value.items()]
+    return [str(value)]
+
+
+def _lookup(asset: Asset, path: str) -> list[_Value]:
+    """Resolve a dotted field path to the string values it names, with provenance.
 
     Returns every value found, because a list field should match if any element
     matches. An empty list means the field is absent.
     """
-    current: Any = asset.data
+    # (value, record it came from). Provenance is only taken from list elements:
+    # those are the discovered sub-records, whereas the top level is the asset itself.
+    entries: list[tuple[Any, dict[str, Any] | None]] = [(asset.data, None)]
+
     for part in path.split("."):
-        if isinstance(current, dict):
-            if part not in current:
-                return []
-            current = current[part]
-        elif isinstance(current, list):
-            collected: list[Any] = []
-            for item in current:
-                if isinstance(item, dict) and part in item:
-                    collected.append(item[part])
-            if not collected:
-                return []
-            current = collected
-        else:
+        following: list[tuple[Any, dict[str, Any] | None]] = []
+        for value, origin in entries:
+            if isinstance(value, dict):
+                if part in value:
+                    following.append((value[part], origin))
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict) and part in item:
+                        following.append((item[part], item if "path" in item else origin))
+        if not following:
             return []
+        entries = following
 
-    def flatten(value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, (str, int, float, bool)):
-            return [str(value)]
-        if isinstance(value, list):
-            return [s for item in value for s in flatten(item)]
-        if isinstance(value, dict):
-            return [f"{k}={v}" for k, v in value.items()]
-        return [str(value)]
-
-    return flatten(current)
+    return [_Value(text, origin) for value, origin in entries for text in _flatten(value)]
 
 
-def _values_for(asset: Asset, condition: Condition) -> list[str]:
+def _values_for(asset: Asset, condition: Condition) -> list[_Value]:
     if condition.source == "text":
-        return [(asset.text or "")[:MAX_MATCH_INPUT]]
-    return [v[:MAX_MATCH_INPUT] for v in _lookup(asset, condition.path or "")]
+        return [_Value((asset.text or "")[:MAX_MATCH_INPUT])]
+    return [
+        _Value(v.text[:MAX_MATCH_INPUT], v.origin)
+        for v in _lookup(asset, condition.path or "")
+    ]
 
 
 #: Characters of context to show either side of the matched text.
@@ -110,6 +130,24 @@ def _locate(asset: Asset, value: str, span: tuple[int, int] | None) -> int | Non
         # not appear in the file at all.
         return None
     return asset.text.count("\n", 0, base + (span[0] if span else 0)) + 1
+
+
+def _locate_in_record(
+    origin: dict[str, Any], condition: Condition, value: str, span: tuple[int, int] | None
+) -> int | None:
+    """The line of the match inside the record's own file.
+
+    A record may publish a starting line per field as ``<field>_line`` — a tool's
+    ``description_line`` is where its docstring begins, which is several lines below
+    the ``line`` where the definition starts. Offsets into the value map onto the file
+    from there, so a directive buried after a long ``Args:`` block resolves to its
+    real line rather than to the top of the function.
+    """
+    field = (condition.path or "").rsplit(".", 1)[-1]
+    base = origin.get(f"{field}_line") or origin.get("line")
+    if not isinstance(base, int) or base <= 0:
+        return None
+    return base + (value[: span[0]].count("\n") if span else 0)
 
 
 def _snippet(value: str, span: tuple[int, int] | None) -> str:
@@ -166,7 +204,7 @@ def evaluate_rule(rule: Rule, asset: Asset) -> tuple[bool, list[Evidence]]:
 
     for condition in rule.match.conditions:
         values = _values_for(asset, condition)
-        matched = _test(condition, values)
+        matched = _test(condition, [v.text for v in values])
         results.append(matched)
         if matched and values:
             # Point at the value that actually matched, not simply the first one:
@@ -175,16 +213,25 @@ def evaluate_rule(rule: Rule, asset: Asset) -> tuple[bool, list[Evidence]]:
                 (
                     (v, s)
                     for v in values
-                    if (s := _match_span(condition, v)) is not None
+                    if (s := _match_span(condition, v.text)) is not None
                 ),
                 (values[0], None),
             )
+            # A value read out of a record that carries its own path belongs to that
+            # file, not to the config that merely referenced it: a match in an MCP
+            # tool description is a line of the server's source, not of .mcp.json.
+            if hit.origin and hit.origin.get("path"):
+                where = str(hit.origin["path"])
+                line = _locate_in_record(hit.origin, condition, hit.text, span)
+            else:
+                where = str(asset.path) if asset.path else asset.source
+                line = _locate(asset, hit.text, span)
             evidence.append(
                 Evidence(
-                    path=str(asset.path) if asset.path else asset.source,
-                    line=_locate(asset, hit, span),
+                    path=where,
+                    line=line,
                     key=condition.path if condition.source == "field" else "text",
-                    snippet=_snippet(hit, span),
+                    snippet=_snippet(hit.text, span),
                     reason=f"matched: {condition.describe()}",
                 )
             )

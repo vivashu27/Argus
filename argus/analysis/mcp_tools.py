@@ -64,6 +64,11 @@ class ToolDef:
     path: Path
     line: int
     how: str
+    #: Line where the description text itself begins, which for a decorated function
+    #: is the docstring rather than the decorator. Offsets into ``description`` map
+    #: onto the file from here, so a match deep in a long docstring resolves to its
+    #: real line. Falls back to ``line`` when the shape does not expose one.
+    description_line: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +83,9 @@ class ToolDef:
             "description": self.description,
             "path": str(self.path),
             "line": self.line,
+            # ``<field>_line`` is the convention the rule engine looks for when
+            # attributing a match inside this record to a line of its own file.
+            "description_line": self.description_line or self.line,
             "how": self.how,
         }
 
@@ -98,7 +106,9 @@ def extract_tools(path: Path, text: str) -> list[ToolDef]:
     """
     found: dict[tuple[str, int], ToolDef] = {}
 
-    def add(name: str, description: str, offset: int, how: str) -> None:
+    def add(
+        name: str, description: str, offset: int, how: str, desc_offset: int | None = None
+    ) -> None:
         name = name.strip()
         if not name or len(name) > 80:
             return
@@ -113,6 +123,7 @@ def extract_tools(path: Path, text: str) -> list[ToolDef]:
                 path=path,
                 line=line,
                 how=how,
+                description_line=_line_of(text, desc_offset) if desc_offset is not None else line,
             )
 
     is_python = path.suffix.lower() == ".py"
@@ -124,20 +135,41 @@ def extract_tools(path: Path, text: str) -> list[ToolDef]:
             described = re.search(
                 r"""description\s*=\s*(?P<q>\"\"\"|'''|["'])(?P<v>.{0,4000}?)(?P=q)""", args, re.S
             )
+            raw_doc = match.group("doc")
+            desc_offset: int | None
+            if described:
+                description = described.group("v")
+                desc_offset = match.start("dargs") + described.start("v")
+            else:
+                description = _clean_docstring(raw_doc or "")
+                # strip() removes leading blank lines, so shift past them to keep an
+                # offset into `description` an offset into the file.
+                desc_offset = (
+                    match.start("doc") + (len(raw_doc) - len(raw_doc.lstrip()))
+                    if raw_doc is not None
+                    else None
+                )
             add(
                 named.group("v") if named else match.group("func"),
-                described.group("v") if described else _clean_docstring(match.group("doc") or ""),
+                description,
                 match.start(),
                 "python decorator",
+                desc_offset,
             )
     else:
         for match in _JS_POSITIONAL.finditer(text):
-            add(match.group("name"), match.group("desc"), match.start(), "sdk call")
+            add(
+                match.group("name"), match.group("desc"), match.start(), "sdk call",
+                match.start("desc"),
+            )
 
     # Applies to both languages: ``Tool(name=..., description=...)`` in Python and a
     # ``{ name, description }`` literal in a JS tool list.
     for match in _NAME_DESC.finditer(text):
-        add(match.group("name"), match.group("desc"), match.start(), "definition literal")
+        add(
+            match.group("name"), match.group("desc"), match.start(), "definition literal",
+            match.start("desc"),
+        )
 
     return sorted(found.values(), key=lambda t: (t.line, t.name))
 
