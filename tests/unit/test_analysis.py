@@ -291,3 +291,14 @@ class TestPathHelpers:
 
     def test_ordinary_path_not_sensitive(self):
         assert touches_sensitive("/home/u/project/src/main.py")[0] is False
+
+
+def test_base64_decoded_into_any_interpreter_is_tier_a():
+    """Decoding a payload into python is no less execution than into sh. Obfuscated
+    code appears in ~10% of confirmed-malicious skills (MaliciousAgentSkillsBench)."""
+    from argus.analysis import commands
+
+    for interpreter in ("sh", "bash", "python3", "perl", "node"):
+        text = f"echo aW1wb3J0IG9z | base64 -d | {interpreter}"
+        matches = [m for m in commands.scan_text(text) if m.tier is commands.Tier.A]
+        assert matches, f"base64 piped into {interpreter} was not Tier A"

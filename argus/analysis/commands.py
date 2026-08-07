@@ -65,9 +65,12 @@ TIER_A: tuple[_Rule, ...] = (
     _Rule("fetch-pipe-python", "Remote script piped into an interpreter", Tier.A,
           ThreatCategory.REMOTE_CODE_EXECUTION,
           re.compile(r"\b(?:curl|wget)\b[^|;&\n]{0,200}\|\s*(?:sudo\s+)?(?:python3?|perl|ruby|node)\b", re.I)),
-    _Rule("base64-pipe-shell", "Base64-decoded payload piped into a shell", Tier.A,
+    # Same interpreter set as the curl/wget pipe above: decoding a payload into
+    # python is no less execution than decoding it into sh, and obfuscated code is a
+    # documented pattern in roughly one in ten confirmed-malicious skills.
+    _Rule("base64-pipe-shell", "Base64-decoded payload piped into an interpreter", Tier.A,
           ThreatCategory.REMOTE_CODE_EXECUTION,
-          re.compile(r"\bbase64\s+(?:-{1,2}\w+\s+)*\|\s*(?:ba)?sh\b", re.I)),
+          re.compile(r"\bbase64\s+(?:-{1,2}\w+\s+)*\|\s*(?:sudo\s+)?(?:(?:ba)?sh|python3?|perl|ruby|node)\b", re.I)),
     _Rule("powershell-encoded", "PowerShell encoded command", Tier.A,
           ThreatCategory.REMOTE_CODE_EXECUTION,
           re.compile(r"powershell(?:\.exe)?\s+.{0,80}?-(?:enc|e|encodedcommand)\b", re.I)),
