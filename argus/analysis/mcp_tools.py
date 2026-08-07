@@ -310,6 +310,9 @@ class ConcealedMatch:
     description: str
     count: int
     codepoints: str
+    #: Where the first concealed character sits, so a finding can name its line
+    #: rather than the top of the description.
+    offset: int = 0
 
 
 def concealed_characters(text: str) -> list[ConcealedMatch]:
@@ -321,21 +324,25 @@ def concealed_characters(text: str) -> list[ConcealedMatch]:
         hits = expression.findall(text)
         if hits:
             points = sorted({f"U+{ord(h[0]):04X}" for h in hits if h})[:6]
+            first = expression.search(text)
             out.append(
                 ConcealedMatch(
                     kind=kind,
                     description=description,
                     count=len(hits),
                     codepoints=", ".join(points),
+                    offset=first.start() if first else 0,
                 )
             )
-    if _WHITESPACE_CURTAIN.search(text):
+    curtain = _WHITESPACE_CURTAIN.search(text)
+    if curtain:
         out.append(
             ConcealedMatch(
                 kind="whitespace-curtain",
                 description="Long blank run hiding text below the visible area",
                 count=1,
                 codepoints="",
+                offset=curtain.start(),
             )
         )
     return out

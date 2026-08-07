@@ -71,6 +71,16 @@ def _description_line(tool: dict[str, str], offset: int = 0) -> int | None:
     return base + (tool.get("description") or "")[:offset].count("\n")
 
 
+def _definition_line(tool: dict[str, str]) -> int | None:
+    """Where the tool is declared. The right anchor for a finding about its *name*
+    — a collision is a property of the declaration, not of the docstring below it."""
+    try:
+        line = int(tool.get("line") or 0)
+    except (TypeError, ValueError):
+        return None
+    return line or None
+
+
 def _code_files(asset: Asset) -> list[tuple[Path, str]]:
     return asset.code_files
 
@@ -238,7 +248,7 @@ class ConcealedToolText(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=_description_line(tool),
+                            line=_description_line(tool, match.offset),
                             key=f"tool.{tool.get('name')}.description",
                             snippet=f"{match.count} × {match.kind}"
                             + (f" ({match.codepoints})" if match.codepoints else ""),
@@ -349,7 +359,7 @@ class ToolShadowing(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=_description_line(tool),
+                            line=_definition_line(tool),
                             key=f"tool.{name}",
                             snippet=f"also declared by {', '.join(others)}",
                             reason="Colliding tool name makes selection ambiguous",
@@ -360,12 +370,13 @@ class ToolShadowing(Check):
                 description = raw.lower()
                 directive = any(word in description for word in self.DIRECTIVE)
 
-                if directive and self.CROSS_SERVER.search(raw):
+                cross = self.CROSS_SERVER.search(raw) if directive else None
+                if cross:
                     reasons.append(f"'{name}' gives instructions about another server's tools")
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=_description_line(tool),
+                            line=_description_line(tool, cross.start()),
                             key=f"tool.{name}.description",
                             snippet=truncate(raw, 180),
                             reason="Description reaches past this server to direct another one",
@@ -383,7 +394,7 @@ class ToolShadowing(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=_description_line(tool),
+                            line=_description_line(tool, description.find(foreign[0].lower())),
                             key=f"tool.{name}.description",
                             snippet=truncate(raw, 180),
                             reason=f"Description directs how {', '.join(foreign[:3])} should be called",
