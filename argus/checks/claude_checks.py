@@ -95,6 +95,7 @@ class DangerousPermissionConfiguration(Check):
                 evidence.append(
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         key="permissions",
                         reason="Key absent — no allow, deny, or ask rules configured",
                     )
@@ -106,6 +107,7 @@ class DangerousPermissionConfiguration(Check):
                 evidence.append(
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         key="permissions.defaultMode",
                         snippet=str(rules.default_mode),
                         reason="Permissive default grants tool use without per-call approval",
@@ -180,6 +182,7 @@ class UnrestrictedBash(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key="permissions.allow",
                                 snippet=rule,
                                 reason="Grants every shell command, not a specific invocation",
@@ -249,6 +252,7 @@ class UnrestrictedFilesystemAccess(Check):
                     evidence.append(
                         self.evidence(
                             path=asset.path,
+                            asset=asset,
                             key="permissions.allow",
                             snippet=rule,
                             reason="File tool granted with no path scope",
@@ -266,6 +270,7 @@ class UnrestrictedFilesystemAccess(Check):
                         evidence.append(
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key="additionalDirectories",
                                 snippet=entry,
                                 reason="Working directory is rooted at / or the home directory",
@@ -413,6 +418,7 @@ class NetworkAccessUnrestricted(Check):
                         evidence.append(
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key="permissions.allow",
                                 snippet=rule,
                                 reason=f"{tool} allowed with no domain restriction",
@@ -563,6 +569,7 @@ class DangerousToolsWithoutApproval(Check):
                 evidence.append(
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         key="permissions.allow",
                         snippet=rule,
                         reason=f"Pre-authorised without an ask rule — permits {reason}",
@@ -643,6 +650,7 @@ class MissingDenyRules(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key="permissions.deny",
                                 reason="Deny list is empty or absent",
                             )
@@ -661,6 +669,7 @@ class MissingDenyRules(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key="permissions.deny",
                                 snippet=", ".join(rules.deny[:5]),
                                 reason=f"No deny rule references: {', '.join(missing[:6])}",
@@ -733,6 +742,7 @@ class DesktopBypassPermissions(Check):
                     evidence.append(
                         self.evidence(
                             path=asset.path,
+                            asset=asset,
                             key=f"preferences.{key}",
                             snippet=f"enabled for {len(enabled_for)} account(s)",
                             reason="Permission bypass or developer mode is switched on",
@@ -819,6 +829,7 @@ class ProjectTrustScope(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"projects.{path}",
                                 snippet=path,
                                 reason=reason,

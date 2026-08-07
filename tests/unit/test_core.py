@@ -481,3 +481,72 @@ class TestBanner:
         console, stream = self._console(encoding="ascii")
         terminal.banner(console, metadata)
         assert self._text(console, stream).isascii()
+
+
+class TestKeyLocation:
+    """A finding about a config key should open on that key, not the top of the file."""
+
+    SETTINGS = (
+        '{\n'
+        '  "permissions": {\n'
+        '    "allow": ["Bash"],\n'
+        '    "deny": []\n'
+        '  }\n'
+        '}\n'
+    )
+
+    def test_dotted_key_resolves_to_its_line(self):
+        from argus.core.safe_io import locate_key
+
+        assert locate_key(self.SETTINGS, "permissions.allow") == 3
+        assert locate_key(self.SETTINGS, "permissions.deny") == 4
+        assert locate_key(self.SETTINGS, "permissions") == 2
+
+    def test_segments_are_matched_in_order(self):
+        """A bare search would find an 'allow' that is not under 'permissions'."""
+        from argus.core.safe_io import locate_key
+
+        text = '{\n  "allow": "decoy",\n  "outer": {\n    "allow": "real"\n  }\n}\n'
+        assert locate_key(text, "outer.allow") == 4
+
+    def test_absent_key_has_no_line_rather_than_a_guess(self):
+        from argus.core.safe_io import locate_key
+
+        assert locate_key(self.SETTINGS, "permissions.nope") is None
+        assert locate_key("", "permissions") is None
+
+    def test_yaml_frontmatter_key(self):
+        from argus.core.safe_io import locate_key
+
+        assert locate_key("---\nname: s\nallowed-tools: [Bash]\n---\n", "allowed-tools") == 3
+
+    def test_evidence_derives_the_line_from_the_key(self):
+        from pathlib import Path
+
+        from argus.checks.base import Check
+        from argus.core.models import Asset, Target
+
+        asset = Asset(asset_id="a", target=Target.CLAUDE_CODE, path=Path("/t/settings.json"),
+                      text=self.SETTINGS, text_is_verbatim=True, source="/t")
+        assert Check.evidence(path=asset.path, key="permissions.allow", asset=asset).line == 3
+
+    def test_synthesised_text_yields_no_line(self):
+        """An MCP asset's text is re-serialised JSON; an offset into it points at
+        nothing the reader can open, so no line beats a plausible wrong one."""
+        from pathlib import Path
+
+        from argus.checks.base import Check
+        from argus.core.models import Asset, Target
+
+        asset = Asset(asset_id="m", target=Target.MCP, path=Path("/t/.mcp.json"),
+                      text='{\n "command": "npx"\n}', source="/t")
+        assert asset.text_is_verbatim is False
+        assert Check.evidence(path=asset.path, key="command", asset=asset).line is None
+
+    def test_an_explicit_line_is_never_overridden(self):
+        from argus.checks.base import Check
+        from argus.core.models import Asset, Target
+
+        asset = Asset(asset_id="a", target=Target.CLAUDE_CODE, text=self.SETTINGS,
+                      text_is_verbatim=True, source="/t")
+        assert Check.evidence(line=99, key="permissions.allow", asset=asset).line == 99

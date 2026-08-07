@@ -52,6 +52,25 @@ def _tools(asset: Asset) -> list[dict[str, str]]:
     return [t for t in (asset.data.get("tools") or []) if isinstance(t, dict)]
 
 
+def _description_line(tool: dict[str, str], offset: int = 0) -> int | None:
+    """The line an offset inside a tool's description falls on.
+
+    ``line`` is where the definition starts — the decorator — which for a long
+    docstring can be dozens of lines above the text that actually matched.
+    ``description_line`` is where the description itself begins, so an offset into
+    it maps onto the file and the reader opens on the payload rather than the
+    function header.
+    """
+    base = tool.get("description_line") or tool.get("line") or 0
+    try:
+        base = int(base)
+    except (TypeError, ValueError):
+        return None
+    if base <= 0:
+        return None
+    return base + (tool.get("description") or "")[:offset].count("\n")
+
+
 def _code_files(asset: Asset) -> list[tuple[Path, str]]:
     return asset.code_files
 
@@ -122,7 +141,7 @@ class ToolPoisoning(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=int(tool.get("line") or 0) or None,
+                            line=_description_line(tool, match.offset),
                             key=f"tool.{tool.get('name')}.description",
                             snippet=match.excerpt,
                             reason=f"[tier {match.tier.value}] {match.description}",
@@ -219,7 +238,7 @@ class ConcealedToolText(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=int(tool.get("line") or 0) or None,
+                            line=_description_line(tool),
                             key=f"tool.{tool.get('name')}.description",
                             snippet=f"{match.count} × {match.kind}"
                             + (f" ({match.codepoints})" if match.codepoints else ""),
@@ -330,7 +349,7 @@ class ToolShadowing(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=int(tool.get("line") or 0) or None,
+                            line=_description_line(tool),
                             key=f"tool.{name}",
                             snippet=f"also declared by {', '.join(others)}",
                             reason="Colliding tool name makes selection ambiguous",
@@ -346,7 +365,7 @@ class ToolShadowing(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=int(tool.get("line") or 0) or None,
+                            line=_description_line(tool),
                             key=f"tool.{name}.description",
                             snippet=truncate(raw, 180),
                             reason="Description reaches past this server to direct another one",
@@ -364,7 +383,7 @@ class ToolShadowing(Check):
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=int(tool.get("line") or 0) or None,
+                            line=_description_line(tool),
                             key=f"tool.{name}.description",
                             snippet=truncate(raw, 180),
                             reason=f"Description directs how {', '.join(foreign[:3])} should be called",
@@ -700,6 +719,7 @@ class ToolDefinitionMutability(Check):
                 evidence.append(
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         key=f"mcpServers.{asset.data.get('name')}.args",
                         snippet=spec,
                         reason="Package spec carries no exact version",

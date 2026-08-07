@@ -25,6 +25,7 @@ from ..core.models import (
     Status,
     Target,
 )
+from ..core.safe_io import locate_key
 
 
 @dataclass
@@ -150,8 +151,18 @@ class Check(ABC):
         key: str | None = None,
         snippet: str | None = None,
         reason: str = "",
+        asset: Any = None,
     ) -> Evidence:
-        """Build an evidence item. ``snippet`` must already be redacted."""
+        """Build an evidence item. ``snippet`` must already be redacted.
+
+        Passing ``asset`` lets a finding about a configuration key resolve to the
+        line that key sits on, so "permissions.allow is too broad" opens on the rule
+        rather than the top of the file. Only where the scanned text is the file byte
+        for byte: a synthesised MCP config would give an offset into a reconstruction,
+        which points at nothing the reader can open.
+        """
+        if line is None and key and asset is not None and getattr(asset, "text_is_verbatim", False):
+            line = locate_key(getattr(asset, "text", None) or "", key)
         return Evidence(
             path=str(path) if path is not None else None,
             line=line if line else None,

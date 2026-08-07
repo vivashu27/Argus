@@ -94,6 +94,7 @@ class UntrustedSource(Check):
                     evidence.append(
                         self.evidence(
                             path=asset.path,
+                            asset=asset,
                             key=f"mcpServers.{asset.data.get('name')}.command",
                             snippet=f"{command} {' '.join(args[:3])}".strip(),
                             reason=(
@@ -110,6 +111,7 @@ class UntrustedSource(Check):
                     evidence.append(
                         self.evidence(
                             path=asset.path,
+                            asset=asset,
                             key=f"mcpServers.{asset.data.get('name')}.url",
                             snippet=url,
                             reason=f"Remote server hosted at unrecognised endpoint '{host}'",
@@ -177,6 +179,7 @@ class ShellInterpreterCommand(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"mcpServers.{asset.data.get('name')}.command",
                                 snippet=f"{command} {' '.join((asset.data.get('args') or [])[:3])}".strip(),
                                 reason="Command is a shell, so arguments are shell-parsed",
@@ -235,6 +238,7 @@ class UnrestrictedFilesystemScope(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"mcpServers.{asset.data.get('name')}.args",
                                 snippet=value,
                                 reason="Argument resolves to the filesystem or home root",
@@ -289,6 +293,7 @@ class SensitiveDirectoryAccess(Check):
                     evidence.append(
                         self.evidence(
                             path=asset.path,
+                            asset=asset,
                             key=f"mcpServers.{asset.data.get('name')}.args",
                             snippet=value,
                             reason=description,
@@ -300,6 +305,7 @@ class SensitiveDirectoryAccess(Check):
                     evidence.append(
                         self.evidence(
                             path=asset.path,
+                            asset=asset,
                             key=f"mcpServers.{asset.data.get('name')}.env.{key}",
                             snippet=value,
                             reason=description,
@@ -361,6 +367,7 @@ class ExcessivePermissions(Check):
                 evidence.append(
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         key=f"mcpServers.{asset.data.get('name')}",
                         snippet=" ".join(argv[:4]),
                         reason="Server is launched with a privilege-escalation wrapper",
@@ -381,6 +388,7 @@ class ExcessivePermissions(Check):
                     evidence.append(
                         self.evidence(
                             path=asset.path,
+                            asset=asset,
                             key=f"mcpServers.{asset.data.get('name')}.{key}",
                             snippet=", ".join(broad),
                             reason="Wildcard or administrative scope declared",
@@ -440,6 +448,7 @@ class HardcodedSecrets(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=match.key or asset.data.get("name"),
                                 snippet=match.redacted,
                                 reason=match.description,
@@ -504,6 +513,7 @@ class ShellInterpolation(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"mcpServers.{asset.data.get('name')}.args",
                                 snippet=value,
                                 reason="Contains shell metacharacters (; & | > < ` $)",
@@ -565,6 +575,7 @@ class RemoteEndpointSecurity(Check):
                 evidence.append(
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         key=f"mcpServers.{asset.data.get('name')}.url",
                         snippet=url,
                         reason="Plaintext HTTP transport to a non-loopback host",
@@ -574,6 +585,7 @@ class RemoteEndpointSecurity(Check):
                 evidence.append(
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         key=f"mcpServers.{asset.data.get('name')}.url",
                         snippet=url,
                         reason="Endpoint uses disposable or tunnelling infrastructure",
@@ -648,6 +660,7 @@ class MissingIntegrityMetadata(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"mcpServers.{asset.data.get('name')}",
                                 snippet=f"{command} {' '.join(args[:3])}".strip(),
                                 reason="No version, integrity, or digest key present",
@@ -708,6 +721,7 @@ class ExcessiveToolCapabilities(Check):
                             [
                                 self.evidence(
                                     path=asset.path,
+                                    asset=asset,
                                     key=f"mcpServers.{asset.data.get('name')}.tools",
                                     snippet=f"{len(declared)} tools declared",
                                     reason="Large tool surface increases injection reachability",
@@ -730,6 +744,7 @@ class ExcessiveToolCapabilities(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"mcpServers.{asset.data.get('name')}",
                                 reason="No static tool manifest available",
                             )
@@ -786,6 +801,7 @@ class DestructiveOperations(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 line=m.line,
                                 snippet=m.context,
                                 reason=f"{m.description} [{m.threat.value}]",
@@ -868,6 +884,7 @@ class CredentialsInEnvironment(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"mcpServers.{asset.data.get('name')}.env.{key}",
                                 snippet=secrets.redact(value),
                                 reason="Literal credential value inherited by the server's subprocesses",

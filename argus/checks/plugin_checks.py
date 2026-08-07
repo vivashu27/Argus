@@ -75,6 +75,7 @@ class PluginUntrustedSource(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key="marketplace",
                                 snippet=str(asset.data.get("marketplace")),
                                 reason=str(asset.data.get("trust_reason")),

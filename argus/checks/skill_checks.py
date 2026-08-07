@@ -79,6 +79,7 @@ class SkillShellExecution(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key="allowed-tools",
                                 snippet=", ".join(unscoped),
                                 reason="Grants every shell command while the Skill is active",
@@ -212,6 +213,7 @@ class SkillPromptInjection(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 line=m.line,
                                 snippet=m.context,
                                 reason=f"{m.description} ({m.confidence} confidence) — {m.recommendation}",

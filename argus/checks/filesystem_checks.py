@@ -118,6 +118,7 @@ class SensitiveFileReachable(Check):
                 [
                     self.evidence(
                         path=asset.path,
+                        asset=asset,
                         snippet=str(asset.data.get("description")),
                         reason=reason,
                     )

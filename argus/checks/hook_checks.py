@@ -100,6 +100,7 @@ class HookUnvalidatedInterpolation(Check):
             evidence = [
                 self.evidence(
                     path=asset.path,
+                    asset=asset,
                     key=f"hooks.{asset.data.get('event')}.command",
                     snippet=command[:200],
                     reason=(
@@ -170,6 +171,7 @@ class HookBroadMatcher(Check):
                         [
                             self.evidence(
                                 path=asset.path,
+                                asset=asset,
                                 key=f"hooks.{event}.matcher",
                                 snippet=matcher or "(empty)",
                                 reason="Wildcard or empty matcher applies to all tools",

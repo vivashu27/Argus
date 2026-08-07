@@ -142,3 +142,29 @@ def file_mode(path: Path) -> int | None:
         return path.stat().st_mode & 0o777
     except OSError:
         return None
+
+
+def locate_key(text: str, key: str) -> int | None:
+    """The 1-based line where a dotted config key appears in raw file text.
+
+    Segments are matched in order, so ``permissions.allow`` finds the ``allow`` that
+    follows ``permissions`` rather than an unrelated ``allow`` earlier in the file.
+    Returns None when any segment is absent — a key Argus derived rather than read
+    verbatim has no line, and a guessed one would be worse than none.
+    """
+    if not text or not key:
+        return None
+    position = 0
+    for segment in key.split("."):
+        segment = segment.strip()
+        if not segment:
+            continue
+        found = -1
+        for form in (f'"{segment}"', f"'{segment}'", f"{segment}:"):
+            index = text.find(form, position)
+            if index != -1 and (found == -1 or index < found):
+                found = index
+        if found == -1:
+            return None
+        position = found
+    return text.count("\n", 0, position) + 1

@@ -165,6 +165,24 @@ Those would have fired on 100% of hooks and produced pure noise. They were repla
 checks that distinguish a risky hook from an ordinary one: unvalidated interpolation of
 agent-controlled input (`HOOK-001`) and an overly broad matcher (`HOOK-002`).
 
+## Line numbers in evidence
+
+Evidence names the file and, where one is knowable, the line — rendered as
+`settings.json:3` in the terminal and Markdown, and as `region.startLine` in SARIF.
+
+Three cases produce a line. A pattern matched in file text reports where it matched.
+A finding about a **configuration key** resolves to that key's line, so
+"`permissions.allow` is too broad" opens on the rule rather than the top of the file.
+A finding about a **tool description** resolves to the line the matched text sits on,
+which for a long docstring is well below the `@mcp.tool()` decorator that starts the
+definition.
+
+A line is reported only where the scanned text is the file byte for byte. An MCP
+server's configuration is re-serialised JSON and a hook's text is its command joined
+to its script, so an offset into either points at nothing the reader can open — those
+report the path alone. `FS-005` and `FS-007` concern permission bits, where no line
+exists to report.
+
 ## Compliance mappings
 
 Mapped only where technically defensible, against pinned revisions:
