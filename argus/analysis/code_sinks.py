@@ -82,7 +82,10 @@ _CONTAINMENT = re.compile(
 
 #: Binding to every interface exposes the server beyond localhost. MCP defines no
 #: mandatory authentication, so an exposed stdio-style server is usually unauthenticated.
-_BIND = re.compile(r"""["'](0\.0\.0\.0|::|\*)["']|--host[= ]+0\.0\.0\.0|host\s*[=:]\s*["']0\.0\.0\.0["']""")
+#: Only the addresses that actually mean "every interface". A bare "*" was matched
+#: here once and fired on `cors({ origin: "*" })` and on glob patterns — quoted
+#: asterisks are everywhere in real code and almost never a bind address.
+_BIND = re.compile(r"""["'](0\.0\.0\.0|::)["']|--host[= ]+0\.0\.0\.0|host\s*[=:]\s*["']0\.0\.0\.0["']""")
 
 _AUTH = re.compile(
     r"Authorization|Bearer\b|api[_-]?key|access[_-]?token|authenticate|verify_token|"

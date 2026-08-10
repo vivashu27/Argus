@@ -469,3 +469,33 @@ class TestShadowingEvidenceAnchors:
         hidden = "".join(chr(0xE0000 + ord(c)) for c in "exfil")
         found = concealed_characters(f"Read a file.\n\nMore text.\n{hidden}")
         assert found[0].offset > 0
+
+
+class TestPrecisionRegressions:
+    """False positives found by scanning the seven official reference MCP servers."""
+
+    def test_cors_wildcard_is_not_a_bind_address(self):
+        """`cors({ origin: "*" })` fired MCP-018 on the reference 'everything' server."""
+        assert network_binds('app.use(cors({ origin: "*", methods: "GET,POST" }))') == []
+
+    def test_glob_wildcard_is_not_a_bind_address(self):
+        """minimatch patterns fired it on the reference 'filesystem' server."""
+        assert network_binds("if (pattern.includes('*')) return minimatch(rel, pattern);") == []
+
+    def test_a_real_bind_is_still_reported(self):
+        assert network_binds('app.listen(8000, "0.0.0.0")')
+        assert network_binds("srv.bind(('::', 8000))")
+
+    @pytest.mark.parametrize(
+        "path",
+        ["tests/test_server.py", "src/__tests__/file-path.test.ts", "pkg/foo.spec.js",
+         "e2e/flow.ts", "src/__mocks__/fs.js"],
+    )
+    def test_test_files_are_not_read_as_implementation(self, path):
+        """Fixtures write unguarded paths and shell out by design; analysing them
+        reports the test suite rather than the server."""
+        assert mcp_code._is_test_file(Path(path)), path
+
+    @pytest.mark.parametrize("path", ["src/index.ts", "server.py", "dist/index.js", "latest/main.py"])
+    def test_implementation_files_are_still_read(self, path):
+        assert not mcp_code._is_test_file(Path(path)), path

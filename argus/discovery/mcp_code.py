@@ -44,6 +44,19 @@ SOURCE_SUFFIXES = (".py", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx")
 #: server they hold the code that actually runs, so they are searched explicitly.
 BUILD_DIRS = ("dist", "build", "lib", "out", "src", "bin")
 
+#: Test code is not the implementation. Fixtures write unguarded paths, spawn
+#: processes and embed sample credentials as a matter of course, so analysing them
+#: as though they ran in production reports the test suite rather than the server.
+TEST_MARKERS = ("test", "tests", "__tests__", "spec", "__mocks__", "fixtures", "e2e")
+
+
+def _is_test_file(path: Path) -> bool:
+    stem = path.stem.lower()
+    if stem.startswith("test_") or stem.endswith(("_test", ".test", ".spec", "_spec")):
+        return True
+    return any(part.lower() in TEST_MARKERS for part in path.parts)
+
+
 #: Bounds on how much of a server is read. A server package can vendor a great deal;
 #: these keep a scan predictable without needing a timeout.
 MAX_SOURCE_FILES = 60
@@ -390,6 +403,8 @@ def _collect(resolution: Resolution) -> None:
         if key in seen:
             continue
         seen.add(key)
+        if _is_test_file(path):
+            continue
         try:
             text = read_text(path, MAX_FILE_BYTES)
         except (ArgusError, OSError, ValueError):
