@@ -78,6 +78,7 @@ class ScanOptions:
     user_scope: bool = True
     rule_paths: list[Path] = field(default_factory=list)
     rules_only: bool = False
+    triage_path: Path | None = None
     verbose: bool = False
 
 
@@ -196,6 +197,15 @@ def run_scan(options: ScanOptions) -> ScanReport:
     # 6-7. Normalization and risk classification
     expired = _apply_exceptions(findings, options.exceptions)
 
+    # False positives, judged by a human and recorded. Applied after exceptions so a
+    # finding is never both accepted and suppressed, and before scoring so it counts
+    # for nothing — but it stays in the list, so the report can disclose it.
+    stale_triage: list[str] = []
+    if options.triage_path is not None:
+        from .triage import apply_triage, load_triage
+
+        stale_triage = apply_triage(findings, load_triage(options.triage_path))
+
     # 8. Scoring
     summary = score_findings(
         findings,
@@ -212,7 +222,7 @@ def run_scan(options: ScanOptions) -> ScanReport:
         scan_roots=discovery_context.scan_roots,
         expired_exceptions=expired,
         unreadable_paths=discovery_context.unreadable,
-        discovery_errors=discovery_context.errors,
+        discovery_errors=discovery_context.errors + stale_triage,
         used_fixtures=any(a.is_fixture for a in assets),
     )
     result = ScanResult(metadata=metadata, findings=findings, assets=assets)

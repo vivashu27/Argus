@@ -187,6 +187,16 @@ def render(report: ScanReport, console: Console | None = None, verbose: bool = F
         out.print(Text(f"  {summary.errors} check(s) errored — coverage is incomplete.", "bold red"))
     if summary.accepted_risk:
         out.print(Text(f"  {summary.accepted_risk} finding(s) accepted as risk.", "yellow"))
+    if summary.suppressed:
+        # Disclosed unconditionally. How much of a clean report rests on suppression
+        # is exactly what a reader needs to know about it.
+        out.print(
+            Text(
+                f"  {summary.suppressed} finding(s) suppressed as false positives "
+                "— see 'argus triage list'.",
+                "yellow",
+            )
+        )
 
     # Findings
     issues = [f for f in report.result.findings if f.status in (Status.FAIL, Status.WARN)]
@@ -306,6 +316,8 @@ def _print_finding(out: Console, finding: Finding, verbose: bool) -> None:
     if not verbose and hidden > 0:
         out.print(Text(f"            … {hidden} more evidence item(s) — use --verbose", "dim"))
 
+    if finding.suppressed:
+        out.print(Text(f"          FALSE POSITIVE: {finding.suppression_reason}", "yellow"))
     if finding.accepted_risk:
         out.print(Text(f"          ACCEPTED RISK: {finding.acceptance_reason}", "yellow"))
     out.print(Text(f"          fix: {meta.remediation}", "green"))

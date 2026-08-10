@@ -313,6 +313,38 @@ Full derivation in [`docs/scoring.md`](docs/scoring.md).
 
 ---
 
+## False positives
+
+A false positive and an accepted risk are different claims, so Argus keeps them
+apart. `exceptions:` in `argus.yaml` says *this finding is real and we are living
+with it* — it stays fully visible and only stops gating. Triage says *the scanner
+was wrong* — it stops counting.
+
+```bash
+argus scan -f json -o ./reports                       # produce a report
+argus triage add MCP-013 --report ./reports/argus-report-*.json \
+      --reason "payload string in our own scanner's docs"
+argus triage list                                     # what is suppressed, and why
+argus scan                                            # .argus-triage.yaml applies automatically
+```
+
+A reason is required; an entry without one is a load error, because an unexplained
+hole in a report is worse than the finding it hides.
+
+Two properties make this safe to use:
+
+**Suppressed findings are never hidden.** They are counted in the summary, listed in
+the findings, and labelled `FAIL — FALSE POSITIVE` with the reason given. How much of
+a clean report rests on suppression is exactly what a reader needs to know.
+
+**Suppression is per finding, not per check.** Entries match a fingerprint of the
+finding's own evidence, so suppressing one hit never disables the check. Change the
+matched text and the fingerprint changes with it: the finding reappears at full
+severity and the stale entry is reported. Line numbers are excluded from the
+fingerprint, so moving code does not churn the file.
+
+---
+
 ## The benchmark
 
 **AASB v1.0** — 71 checks in 8 sections. Check IDs are canonical; CIS-style numbers are

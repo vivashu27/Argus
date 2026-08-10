@@ -132,6 +132,7 @@ def scan(
     no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Scan only --path; skip user-level locations (~/.claude, Claude Desktop)."),
     rules: list[Path] | None = typer.Option(None, "--rules", "-r", help="Custom .argus rule file or directory. Repeatable."),
     rules_only: bool = typer.Option(False, "--rules-only", help="Run only custom .argus rules; skip the built-in AASB checks."),
+    triage: Path | None = typer.Option(None, "--triage", help="Triage file of findings judged false positives (default: .argus-triage.yaml if present)."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
 ) -> None:
     """Discover and audit AI-agent configuration in this environment."""
@@ -200,6 +201,7 @@ def scan(
         user_scope=not no_user_scope,
         rule_paths=rule_paths,
         rules_only=rules_only,
+        triage_path=_triage_path(triage, project_root),
         verbose=verbose,
     )
 
@@ -542,6 +544,144 @@ def rule_test(
     raise typer.Exit(
         EXIT_FINDINGS if any(f.is_open for f in report.result.findings) else EXIT_OK
     )
+
+
+def _triage_path(explicit: Path | None, project_root: Path) -> Path | None:
+    """An explicit path is used as given; otherwise the project's file if it exists."""
+    from .core.triage import DEFAULT_TRIAGE_FILE
+
+    if explicit is not None:
+        if not explicit.is_file():
+            _fail(f"triage file not found: {explicit}")
+        return explicit
+    default = project_root / DEFAULT_TRIAGE_FILE
+    return default if default.is_file() else None
+
+
+triage_app = typer.Typer(
+    name="triage",
+    help="Record findings judged to be false positives, and list what is suppressed.",
+    no_args_is_help=True,
+)
+app.add_typer(triage_app)
+
+
+@triage_app.command("add")
+def triage_add(
+    check: str = typer.Argument(..., help="Check ID to suppress, e.g. MCP-013."),
+    reason: str = typer.Option(..., "--reason", help="Why this finding is wrong. Required."),
+    report: Path = typer.Option(..., "--report", help="A JSON report from 'argus scan -f json'."),
+    asset: str | None = typer.Option(None, "--asset", help="Limit to one asset."),
+    file: Path | None = typer.Option(None, "--file", help="Triage file to write (default: .argus-triage.yaml)."),
+) -> None:
+    """Mark findings in a report as false positives.
+
+    Matching is on the finding's evidence, not its check ID, so suppressing one hit
+    does not disable the check. Edit the evidence and it reappears under a new
+    fingerprint — which is the intended behaviour, not a bug.
+    """
+    import json as _json
+
+    from .core.triage import DEFAULT_TRIAGE_FILE, TriageEntry, load_triage, save_triage
+
+    if not reason.strip():
+        _fail("--reason cannot be empty. Every suppression must say why the finding is wrong.")
+    try:
+        payload = _json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        _fail(f"cannot read report {report}: {exc}")
+
+    wanted = check.strip().upper()
+    matches = [
+        f for f in payload.get("findings", [])
+        if str(f.get("id", "")).upper() == wanted
+        and (asset is None or f.get("asset") == asset)
+        and f.get("status") in ("FAIL", "WARN")
+    ]
+    if not matches:
+        _fail(f"no open {wanted} finding in {report}" + (f" for asset {asset}" if asset else ""))
+
+    destination = file or Path(DEFAULT_TRIAGE_FILE)
+    entries = load_triage(destination) if destination.is_file() else []
+    known = {e.fingerprint for e in entries}
+
+    added = 0
+    for finding in matches:
+        mark = _fingerprint_from_report(finding)
+        if mark in known:
+            continue
+        entries.append(
+            TriageEntry(
+                fingerprint=mark,
+                reason=reason.strip(),
+                check_id=str(finding.get("id", "")),
+                asset=str(finding.get("asset", "")),
+                added=_dt.date.today().isoformat(),
+            )
+        )
+        known.add(mark)
+        added += 1
+
+    save_triage(destination, entries)
+    console.print(
+        Text(f"  {added} finding(s) suppressed · {destination} now holds {len(entries)}", "green")
+    )
+    err_console.print(
+        Text("  Suppressed findings are still counted and listed in every report.", "dim")
+    )
+
+
+def _fingerprint_from_report(finding: dict) -> str:
+    """Rebuild a finding's fingerprint from its serialised form.
+
+    Kept identical to :func:`argus.core.triage.fingerprint` by reconstructing the
+    finding rather than duplicating the hash, so the two can never drift.
+    """
+    from .core.models import Evidence, Finding, Status
+    from .core.registry import get_check
+    from .core.triage import fingerprint
+
+    check = get_check(str(finding.get("id", "")))
+    if check is None:
+        _fail(f"unknown check in report: {finding.get('id')!r}")
+        raise AssertionError  # unreachable: _fail raises
+    return fingerprint(
+        Finding(
+            meta=check.meta,
+            status=Status(finding.get("status", "FAIL")),
+            asset=str(finding.get("asset", "")),
+            detail=str(finding.get("detail", "")),
+            evidence=[
+                Evidence(
+                    path=e.get("path"), line=e.get("line"), key=e.get("key"),
+                    snippet=e.get("snippet"), reason=e.get("reason", ""),
+                )
+                for e in finding.get("evidence", [])
+            ],
+        )
+    )
+
+
+@triage_app.command("list")
+def triage_list(
+    file: Path | None = typer.Option(None, "--file", help="Triage file to read."),
+) -> None:
+    """Show every suppressed finding and the reason given."""
+    from .core.triage import DEFAULT_TRIAGE_FILE, load_triage
+
+    destination = file or Path(DEFAULT_TRIAGE_FILE)
+    entries = load_triage(destination)
+    if not entries:
+        console.print(Text(f"  No suppressions in {destination}.", "dim"))
+        raise typer.Exit(EXIT_OK)
+
+    table = Table(box=None, padding=(0, 2), header_style="dim")
+    for column in ("Fingerprint", "Check", "Asset", "Added", "Reason"):
+        table.add_column(column)
+    for entry in entries:
+        table.add_row(entry.fingerprint, entry.check_id, entry.asset, entry.added, entry.reason)
+    console.print(table)
+    console.print(Text(f"\n  {len(entries)} suppressed finding(s) in {destination}", "dim"))
 
 
 @app.command()

@@ -249,6 +249,13 @@ class Finding:
     severity_override: Severity | None = None
     accepted_risk: bool = False
     acceptance_reason: str = ""
+    #: Judged a false positive by a human and recorded in the triage file. Distinct
+    #: from accepted_risk: that says the finding is real and tolerated, this says the
+    #: scanner was wrong. Suppressed findings score nothing and gate nothing, but are
+    #: still counted and listed — a silently dropped finding would make a clean report
+    #: meaningless.
+    suppressed: bool = False
+    suppression_reason: str = ""
     na_reason: str = ""
 
     @property
@@ -265,10 +272,12 @@ class Finding:
     @property
     def is_open(self) -> bool:
         """True when this finding gates the exit code (spec 3.5): FAIL, not accepted."""
-        return self.status is Status.FAIL and not self.accepted_risk
+        return self.status is Status.FAIL and not self.accepted_risk and not self.suppressed
 
     @property
     def display_status(self) -> str:
+        if self.suppressed:
+            return f"{self.status.value} — FALSE POSITIVE"
         if self.accepted_risk and self.status is Status.FAIL:
             return "FAIL — ACCEPTED RISK"
         return self.status.value
@@ -295,6 +304,8 @@ class Finding:
             "compliance_mappings": self.meta.compliance_dict(),
             "evidence": [e.to_dict() for e in self.evidence],
             "accepted_risk": self.accepted_risk,
+            "suppressed": self.suppressed,
+            "suppression_reason": self.suppression_reason,
             "acceptance_reason": self.acceptance_reason,
             "not_applicable_reason": self.na_reason,
         }

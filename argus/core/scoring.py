@@ -78,6 +78,7 @@ class Summary:
     not_applicable: int = 0
     errors: int = 0
     accepted_risk: int = 0
+    suppressed: int = 0
     critical: int = 0
     high: int = 0
     medium: int = 0
@@ -106,6 +107,7 @@ class Summary:
             "not_applicable": self.not_applicable,
             "errors": self.errors,
             "accepted_risk": self.accepted_risk,
+            "suppressed": self.suppressed,
             "critical": self.critical,
             "high": self.high,
             "medium": self.medium,
@@ -156,6 +158,11 @@ def score_findings(
             attr = severity_counters[finding.severity]
             setattr(summary, attr, getattr(summary, attr) + 1)
 
+        if finding.suppressed:
+            # Judged wrong by a human: it cannot deduct, but it is still counted so
+            # the report shows how much of the result rests on suppression.
+            summary.suppressed += 1
+            continue
         if finding.accepted_risk:
             summary.accepted_risk += 1
             if not score_accepted_risk:
