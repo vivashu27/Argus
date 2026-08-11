@@ -36,8 +36,22 @@ def status_of(findings, asset_substring: str = "") -> Status:
 
 
 class TestClaudeChecks:
-    def test_claude001_flags_missing_permissions(self, project, home):
+    def test_claude001_skips_a_file_that_configures_no_permissions(self, project, home):
+        """Absence of a permissions block is not a dangerous permissions block.
+
+        This asserted FAIL until the check was measured against 150 public
+        ``.claude/settings.json`` files, where it fired on 49 of them for having no
+        policy at all. A file that grants nothing cannot grant too much, and a HIGH
+        finding on three quarters of the population tells a reader nothing.
+        """
         asset = settings_asset(home / ".claude/settings.json", {"model": "opus"})
+        findings = run_check(claude_checks.DangerousPermissionConfiguration, [asset], project, home)
+        assert status_of(findings) is Status.NOT_APPLICABLE
+
+    def test_claude001_still_flags_a_permissive_default_mode(self, project, home):
+        asset = settings_asset(
+            home / ".claude/settings.json", {"permissions": {"defaultMode": "bypassPermissions"}}
+        )
         findings = run_check(claude_checks.DangerousPermissionConfiguration, [asset], project, home)
         assert status_of(findings) is Status.FAIL
 

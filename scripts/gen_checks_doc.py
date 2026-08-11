@@ -33,7 +33,7 @@ def main() -> None:
         )
 
     print("\n## Levels\n")
-    for number, info in aasb_v1.LEVELS.items():
+    for _number, info in aasb_v1.LEVELS.items():
         print(f"**{info['name']}** — {info['description']}\n")
 
     for section in sections:

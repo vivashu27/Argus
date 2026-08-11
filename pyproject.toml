@@ -51,6 +51,9 @@ ignore = ["S101", "E501"]
 "argus/analysis/*" = ["S105", "S106", "S107"]
 # B008 is Typer's documented idiom: options must be declared as argument defaults.
 "argus/cli.py" = ["B008"]
+# Corpus tooling shells out to gh, git and curl by design; the arguments are
+# benchmark URLs, not scanned content.
+"scripts/*" = ["S603", "S607"]
 
 [tool.mypy]
 python_version = "3.10"

@@ -21,6 +21,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..analysis.mcp_tools import ToolDef, extract_tools
+
+# Shared with the plugin checks, which face the same problem: a fake JWT in
+# ``test_redact_headers.py`` is a fixture, not a leaked credential.
+from ..analysis.paths import TEST_MARKERS  # noqa: F401
+from ..analysis.paths import is_test_file as _is_test_file
 from ..core.exceptions import ArgusError
 from ..core.models import Asset
 from ..core.safe_io import iter_files, read_text
@@ -43,19 +48,6 @@ SOURCE_SUFFIXES = (".py", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx")
 #: name because they are build artefacts in a source tree — but for an installed MCP
 #: server they hold the code that actually runs, so they are searched explicitly.
 BUILD_DIRS = ("dist", "build", "lib", "out", "src", "bin")
-
-#: Test code is not the implementation. Fixtures write unguarded paths, spawn
-#: processes and embed sample credentials as a matter of course, so analysing them
-#: as though they ran in production reports the test suite rather than the server.
-TEST_MARKERS = ("test", "tests", "__tests__", "spec", "__mocks__", "fixtures", "e2e")
-
-
-def _is_test_file(path: Path) -> bool:
-    stem = path.stem.lower()
-    if stem.startswith("test_") or stem.endswith(("_test", ".test", ".spec", "_spec")):
-        return True
-    return any(part.lower() in TEST_MARKERS for part in path.parts)
-
 
 #: Bounds on how much of a server is read. A server package can vendor a great deal;
 #: these keep a scan predictable without needing a timeout.

@@ -7,6 +7,7 @@ as text and nothing inside them is ever acted on.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from ..core.exceptions import ArgusError
@@ -34,10 +35,19 @@ def discover(context: DiscoveryContext) -> list[Asset]:
         except (OSError, ValueError, ArgusError) as exc:
             context.record_unreadable(path, str(exc))
             return
+        # Identify project files by their path relative to the root, not by name.
+        # A monorepo has a CLAUDE.md per package and the repo root has both
+        # ./CLAUDE.md and ./.claude/CLAUDE.md — keying on the bare filename gave
+        # every one of them the same asset id, so a report listing findings from
+        # several of them looked like several findings against one file.
+        label = path.name
+        if scope != "user":
+            with contextlib.suppress(ValueError):
+                label = path.relative_to(context.project_root).as_posix()
         seen.add(resolved)
         assets.append(
             Asset(
-                asset_id=f"instructions:{scope}:{path.name}",
+                asset_id=f"instructions:{scope}:{label}",
                 target=Target.INSTRUCTIONS,
                 path=path,
                 data={"scope": scope, "name": path.name, "lines": text.count("\n") + 1},

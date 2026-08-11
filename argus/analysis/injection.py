@@ -41,6 +41,28 @@ class InjectionMatch:
         return not self.discounted and self.confidence in ("HIGH", "MEDIUM")
 
 
+#: Codepoints that may legitimately precede a zero-width joiner: pictographs,
+#: dingbats, arrows, keycap bases, and the variation selectors that follow them.
+_PICTOGRAPHIC = (
+    "\U0001F000-\U0001FAFF←-⇿⌀-⏿☀-➿"
+    "⬀-⯿⃣︎️"
+)
+
+
+#: Somewhere a credential could actually be sent. Exfiltration is a claim about a
+#: destination, so requiring one is not a weakening of the rule but a statement of
+#: it. A relative path or an unqualified noun is not a destination — "POST to
+#: /oauth/token" is how OAuth works, not how credentials leave a machine.
+_DESTINATION = (
+    r"(?:https?://|ftps?://|\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b|"
+    r"\b\d{1,3}(?:\.\d{1,3}){3}\b|"
+    r"\b(?:webhook|pastebin|paste\.ee|hastebin|ngrok|requestbin|burpcollaborator|"
+    r"discord|telegram|slack\s+hook|c2|command[\s-]and[\s-]control|"
+    r"(?:remote|external|attacker|our|my|third[\s-]party)[\s-]+(?:\w+[\s-]+)?"
+    r"(?:server|host|endpoint|url|site|api|service|collector|bucket|inbox))\b)"
+)
+
+
 @dataclass(frozen=True)
 class _Rule:
     pattern_id: str
@@ -77,10 +99,14 @@ RULES: tuple[_Rule, ...] = (
                      r"(?:system\s+prompt|initial\s+instruction|hidden\s+instruction|"
                      r"prior\s+context|configuration\s+prompt)s?\b", re.I),
           "Remove the directive. Prompt disclosure requests in config files are a known exfiltration vector."),
+    # The trailing lookahead separates concealment from delegation. "Don't tell the
+    # user to run them" instructs the agent to act rather than hand work back; only
+    # "don't tell the user <about something>" is concealment.
     _Rule("hidden-instruction", "Instruction framed as hidden from the user",
           "concealment", "HIGH",
           re.compile(r"\b(?:do\s+not|don'?t|never)\s+(?:tell|inform|mention\s+to|reveal\s+to|"
-                     r"disclose\s+to|notify|show)\s+(?:the\s+)?(?:user|human|operator|owner)\b", re.I),
+                     r"disclose\s+to|notify|show)\s+(?:the\s+)?(?:user|human|operator|owner)\b"
+                     r"(?!\s+to\s+\w)", re.I),
           "Remove the directive. Concealing agent behaviour from the operator is not legitimate configuration."),
     _Rule("silent-execution", "Instruction to act without confirmation",
           "policy_subversion", "MEDIUM",
@@ -98,16 +124,30 @@ RULES: tuple[_Rule, ...] = (
                      r"\b(?:instruction|prompt|directive|command|rule|config)s?\b[^\n]{0,60}?"
                      r"https?://", re.I),
           "Pin instructions locally. Remote instruction sources allow silent post-approval changes."),
+    # ``(?<![\w-])`` keeps the verb from matching inside an identifier. Without it,
+    # a crate feature named ``ort-download-binaries`` paired with the word "run"
+    # anywhere in the same sentence reads as download-and-execute.
+    # The connector is required, not optional. Fetch-then-execute is always written
+    # as two joined steps — "download the script and run it", "curl … | sh". Without
+    # it, prose like "the active download run now owns a live handle" is two ordinary
+    # words that happen to be adjacent.
     _Rule("url-then-execute", "Download-and-execute directive",
           "remote_instruction", "HIGH",
-          re.compile(r"\b(?:download|fetch|curl|wget)\b[^\n]{0,80}?\b(?:and\s+)?"
-                     r"(?:then\s+)?(?:run|execute|eval|install)\b", re.I),
+          re.compile(r"(?<![\w-])(?:download|fetch|curl|wget)(?![\w-])[^\n]{0,80}?"
+                     r"(?:\band\b|\bthen\b|&&|\|\|?|;)\s*(?:\bthen\b\s*)?"
+                     r"(?:\w+\s+){0,3}?(?:run|execute|eval|install|bash|sh|source)\b", re.I),
           "Remove the directive. Fetch-then-execute is the canonical agent RCE pattern."),
+    # Three constraints, each earning its place against observed noise. Identifier
+    # guards stop ``x-revalidate-secret`` and ``Post-Exploitation``. The destination
+    # requirement is what the check's own title claims — transmitting credentials
+    # *externally* — and without it every OAuth README matched, because "POST" and
+    # "token" co-occur in all of them.
     _Rule("exfiltrate-secrets", "Directive to transmit credentials externally",
           "exfiltration", "HIGH",
-          re.compile(r"\b(?:send|post|upload|transmit|exfiltrate|forward|email|leak|report)\b"
-                     r"[^\n]{0,80}?\b(?:secret|credential|api[\s_\-]?key|token|password|"
-                     r"private[\s_\-]?key|\.env|ssh\s+key)s?\b", re.I),
+          re.compile(r"(?<![\w-])(?:send|post|upload|transmit|exfiltrate|forward|email|leak|report)"
+                     r"(?![\w-])[^\n]{0,80}?(?:(?<![\w-])(?:secret|credential|api[\s_\-]?key|"
+                     r"token|password|private[\s_\-]?key|ssh\s+key)s?(?![\w-])|\.env\b)"
+                     rf"[^\n]{{0,80}}?{_DESTINATION}", re.I),
           "Remove the directive and rotate any credential reachable from this environment."),
     _Rule("read-credentials", "Directive to read credential stores",
           "exfiltration", "MEDIUM",
@@ -131,9 +171,16 @@ RULES: tuple[_Rule, ...] = (
           re.compile(r"\b(?:base64|atob|fromCharCode|rot13|hex\s*decode|unescape)\b"
                      r"[^\n]{0,60}?\b(?:exec|eval|run|decode\s+and)\b", re.I),
           "Decode and review the payload manually before trusting this file."),
+    # U+200D is exempt when it follows a pictograph or a variation selector: that is
+    # an emoji ZWJ sequence, not concealment. "🕵️‍♀️" is one such sequence, and a
+    # scanner that calls a detective emoji a hidden instruction teaches its users to
+    # ignore the check. Every other zero-width and bidirectional control still counts.
     _Rule("invisible-text", "Zero-width or bidirectional control characters",
           "concealment", "HIGH",
-          re.compile(r"[​-‏‪-‮⁠-⁤﻿]"),
+          re.compile(
+              rf"[​‌‎‏‪-‮⁠-⁤﻿]"
+              rf"|(?<![{_PICTOGRAPHIC}])‍"
+          ),
           "Strip the characters. Invisible text hides instructions from human review but not from the model."),
 )
 
@@ -159,6 +206,64 @@ _SECURITY_DOC = re.compile(
     re.I,
 )
 _SECURITY_DOC_THRESHOLD = 3
+
+#: A lead-in that turns the list beneath it into a list of prohibitions. "Claude Code
+#: must never:" followed by bullets is one of the most common shapes in real
+#: instruction files, and each bullet inherits the negation from the heading rather
+#: than restating it. Reading those bullets as directives inverts their meaning,
+#: which is the worst error available to a security scanner: it reports the presence
+#: of a rule as the absence of one.
+_PROHIBITION_LEAD = re.compile(
+    r"\b(?:never|must\s+not|should\s+not|do\s+not|don'?t|avoid|forbidden|prohibited|"
+    r"not\s+allowed|disallowed|off[\s-]?limits)\b[^\n]*:[*_\s]*$",
+    re.I,
+)
+
+#: The same negation stated on the line itself rather than inherited from a heading.
+#: Matched against the text *preceding* the rule's own match, not against the start
+#: of the line: "don't create new folders without approval" and "### Forbidden
+#: Without Permission" both negate, and neither puts the cue in column one.
+_NEGATION_CUE = re.compile(
+    r"\b(?:must\s+not|must\s+never|shall\s+not|should\s+not|never|not\s+ever|"
+    r"do\s+not|does\s+not|did\s+not|don'?t|doesn'?t|didn'?t|cannot|can'?t|won'?t|"
+    r"refrain\s+from|forbidden|prohibited|not\s+allowed|disallowed|"
+    r"under\s+no\s+circumstances|no\s+longer)\b",
+    re.I,
+)
+
+_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_MD_HEADING = re.compile(r"^\s*#{1,6}\s")
+
+#: Rules whose own pattern already contains the negation. Discounting these for
+#: sitting under a prohibition would suppress precisely what they exist to find.
+_NEGATION_INTRINSIC = frozenset({"hidden-instruction", "invisible-text"})
+
+
+def _prohibition_scope(lines: list[str]) -> set[int]:
+    """1-based line numbers governed by a prohibition lead-in.
+
+    A lead-in governs the list that follows it. Blank lines do not end the list —
+    loosely formatted markdown separates bullets with them — but a heading or an
+    ordinary paragraph does.
+    """
+    governed: set[int] = set()
+    active = False
+    for index, line in enumerate(lines, start=1):
+        if _PROHIBITION_LEAD.search(line):
+            active = True
+            continue
+        if not active:
+            continue
+        if not line.strip():
+            continue
+        if _MD_HEADING.match(line):
+            active = False
+            continue
+        if _LIST_ITEM.match(line):
+            governed.add(index)
+            continue
+        active = False
+    return governed
 
 
 def _downgrade(confidence: str) -> str:
@@ -188,6 +293,7 @@ def scan_text(
 
     security_doc = is_security_document(text)
     lines = text.splitlines()
+    prohibited = _prohibition_scope(lines)
 
     for index, line in enumerate(lines, start=1):
         if _FENCE.match(line):
@@ -201,23 +307,32 @@ def scan_text(
         # A phrase inside a code fence, a quote, or an explicitly labelled example is
         # far more likely to be documentation than a live directive.
         window = " ".join(lines[max(0, index - 3) : index + 1])
-        reason = ""
+        base_reason = ""
         if in_fence:
-            reason = "inside a code fence"
+            base_reason = "inside a code fence"
         elif line.lstrip().startswith(">"):
-            reason = "inside a blockquote"
+            base_reason = "inside a blockquote"
         elif _DISCOUNT_MARKERS.search(window):
-            reason = "adjacent to example or detection-description language"
+            base_reason = "adjacent to example or detection-description language"
         elif security_doc:
-            reason = "document reads as offensive-security documentation"
+            base_reason = "document reads as offensive-security documentation"
 
         for rule in RULES:
-            if not rule.regex.search(line):
+            match = rule.regex.search(line)
+            if match is None:
                 continue
             key = (rule.pattern_id, lineno)
             if key in seen:
                 continue
             seen.add(key)
+
+            negated = ""
+            if rule.pattern_id not in _NEGATION_INTRINSIC:
+                if index in prohibited:
+                    negated = "listed under a prohibition heading"
+                elif _NEGATION_CUE.search(line[: match.start()]):
+                    negated = "the line states the behaviour as prohibited"
+            reason = base_reason or negated
             matches.append(
                 InjectionMatch(
                     pattern_id=rule.pattern_id,
@@ -269,6 +384,12 @@ UNTRUSTED_DOMAINS = frozenset(
 METADATA_ENDPOINTS = frozenset({"169.254.169.254", "metadata.google.internal", "100.100.100.200"})
 
 _IPV4 = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+
+#: RFC 1918 private ranges, plus link-local and carrier-grade NAT.
+_PRIVATE_IPV4 = re.compile(
+    r"^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.|100\.(?:6[4-9]|"
+    r"[7-9]\d|1[01]\d|12[0-7])\.)"
+)
 # S104 does not apply: these are host names being *recognised*, not bound to.
 _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})  # noqa: S104
 
@@ -301,6 +422,11 @@ def classify_host(host: str) -> tuple[bool, str]:
     if is_trusted_host(host):
         return False, ""
     if _IPV4.match(host):
+        if _PRIVATE_IPV4.match(host):
+            # An RFC 1918 or link-local address is LAN infrastructure — a Raspberry
+            # Pi, a dev VM, a service on the same host. It is not an exfiltration
+            # destination, and flagging it makes the check useless on home labs.
+            return False, ""
         return True, "bare IP literal rather than a named host"
     return False, ""
 

@@ -240,3 +240,18 @@ def touches_sensitive(value: str) -> tuple[bool, str]:
         if lowered.startswith(system_path):
             return True, f"System-sensitive path {system_path}"
     return False, ""
+
+
+#: Test code is not the implementation. Fixtures write unguarded paths, spawn
+#: processes and embed sample credentials as a matter of course, so analysing them
+#: as though they ran in production reports the test suite rather than the product.
+TEST_MARKERS = ("test", "tests", "__tests__", "spec", "__mocks__", "fixtures", "e2e")
+
+
+def is_test_file(path: Path | str) -> bool:
+    """Whether a path is test code rather than shipped implementation."""
+    path = Path(path)
+    stem = path.stem.lower()
+    if stem.startswith("test_") or stem.endswith(("_test", ".test", ".spec", "_spec")):
+        return True
+    return any(part.lower() in TEST_MARKERS for part in path.parts)

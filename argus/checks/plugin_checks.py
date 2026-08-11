@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from ..analysis import commands, injection, secrets
-from ..analysis.paths import touches_sensitive
+from ..analysis.paths import is_test_file, touches_sensitive
 from ..core.models import (
     Asset,
     Category,
     CheckMeta,
     Confidence,
+    Evidence,
     Finding,
     Severity,
     Target,
@@ -294,20 +295,49 @@ class PluginEmbeddedCredentials(Check):
 
         findings: list[Finding] = []
         for asset in assets:
-            evidence = []
+            evidence: list[Evidence] = []
+            illustrative: list[Evidence] = []
             high = False
             for entry in asset.data.get("files") or []:
+                # Redaction tests and integration fixtures embed sample tokens on
+                # purpose — that is what they are testing. Reporting them as leaked
+                # credentials at CRITICAL was the single largest source of noise on
+                # a corpus of 83 public marketplace plugins.
+                if is_test_file(entry["path"]):
+                    continue
+                # A hardening guide that shows `DB_PASSWORD = "hunter2"` under a
+                # "don't do this" heading is documenting the mistake, not making it.
+                # Same judgement the injection analyzer already applies to prose.
+                documentation = entry["relative"].lower().endswith(
+                    (".md", ".mdx", ".rst", ".txt")
+                ) and injection.is_security_document(entry["text"])
                 for match in secrets.scan_text(entry["text"])[:4]:
-                    evidence.append(
-                        self.evidence(path=entry["path"], line=match.line,
-                                      snippet=match.redacted, reason=match.description)
+                    item = self.evidence(
+                        path=entry["path"], line=match.line, snippet=match.redacted,
+                        reason=match.description
+                        + (" — in security documentation, likely illustrative"
+                           if documentation else ""),
                     )
+                    if documentation:
+                        illustrative.append(item)
+                        continue
+                    evidence.append(item)
                     high = high or match.confidence == "HIGH"
             if evidence:
                 findings.append(
                     self.fail(asset.asset_id, f"{len(evidence)} credential literal(s) in plugin files.",
                               evidence[:10],
                               confidence=Confidence.HIGH if high else Confidence.MEDIUM)
+                )
+            elif illustrative:
+                findings.append(
+                    self.warn(
+                        asset.asset_id,
+                        f"{len(illustrative)} credential-shaped value(s), all in security "
+                        "documentation.",
+                        illustrative[:10],
+                        confidence=Confidence.LOW,
+                    )
                 )
             else:
                 findings.append(self.ok(asset.asset_id, "No embedded credentials."))

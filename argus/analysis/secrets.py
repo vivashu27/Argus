@@ -84,7 +84,7 @@ GENERIC_ASSIGNMENT = re.compile(
     r"""(?P<key>[A-Za-z0-9_\-.]*(?:api[_\-]?key|apikey|secret|token|password|passwd|
         pwd|credential|auth|access[_\-]?key|private[_\-]?key|client[_\-]?secret)
         [A-Za-z0-9_\-.]*)
-        \s*[:=]\s*
+        \s*[:=](?![:=>])\s*
         ["']?(?P<value>[^\s"',}\]]{8,200})["']?""",
     re.IGNORECASE | re.VERBOSE,
 )
@@ -103,7 +103,7 @@ INDIRECTION = re.compile(
 #: every SDK reference page reports as a credential leak.
 _CODE_SHAPED = re.compile(
     r"(?:\?\.|=>|\(\)|\);|\.\w+\(|^\w+\.\w+|::|\blet\b|\bconst\b|\bvar\b|"
-    r"\bawait\b|\bnew\s+\w|\bself\.|\bthis\.|\{\}|\[\]|;$)"
+    r"\bawait\b|\bnew\s+\w|\bself\.|\bthis\.|\{\}|\[\]|;$|\w\()"
 )
 
 
@@ -130,6 +130,49 @@ def _looks_like_code(value: str) -> bool:
     return bool(_CODE_SHAPED.search(value))
 
 
+#: Identifiers that contain a credential word without naming a credential. LLM code
+#: counts ``total_tokens`` on every call, ``UnauthorizedAccess`` matches on "auth",
+#: and ``authors`` matches for the same reason. These accounted for most of the
+#: CRITICAL credential findings on a corpus of 83 public marketplace plugins.
+_NON_CREDENTIAL_KEY = re.compile(
+    r"(?:^|[_\-.])(?:total|prompt|completion|input|output|max|min|num|n|used|"
+    r"remaining|cached|reasoning|thinking)[_\-]?tokens?$"
+    r"|tokens?[_\-]?(?:count|used|total|limit|usage|per|budget)"
+    r"|tokeniz"
+    r"|\bauthors?\b|unauthoriz|authenticat(?:ed|ing)\b|author(?:ed|ing)\b",
+    re.I,
+)
+
+#: Source files whose names contain a credential word — ``tokeninfo.cpp``,
+#: ``auth.py`` — are filenames, not assignment targets. Nothing is ever "assigned to"
+#: a translation unit.
+_SOURCE_FILE_KEY = re.compile(
+    r"\.(?:c|h|cc|cpp|hpp|cs|py|rb|go|rs|java|kt|swift|js|jsx|ts|tsx|php|sh|"
+    r"md|txt|json|ya?ml|toml|sql|proto)$",
+    re.I,
+)
+
+#: Hosts whose embedded credentials cannot be used from anywhere else. A local test
+#: fixture with ``postgres:postgres@127.0.0.1`` is not a leaked credential.
+_LOCAL_HOST = re.compile(
+    r"^(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?|"
+    r"10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|"
+    r"host\.docker\.internal|.*\.local|.*\.test|.*\.example|.*\.invalid)$",
+    re.I,
+)
+
+
+def _is_local_credential_url(line: str, value: str) -> bool:
+    """Whether a ``user:pass@host`` match points at a host only reachable locally."""
+    for match in re.finditer(r"://[^/\s:@]{1,64}:([^/\s:@]{3,64})@([^/\s:?#]+)", line):
+        if match.group(1) != value:
+            continue
+        host = match.group(2).split(":")[0]
+        if _LOCAL_HOST.match(host):
+            return True
+    return False
+
+
 def scan_text(text: str, *, max_findings: int = 50) -> list[SecretMatch]:
     """Scan text for credentials. Returns redacted matches only."""
     matches: list[SecretMatch] = []
@@ -144,6 +187,10 @@ def scan_text(text: str, *, max_findings: int = 50) -> list[SecretMatch]:
             for match in pattern.regex.finditer(line):
                 value = match.group(pattern.group) if pattern.group else match.group(0)
                 if pattern.kind != "private_key" and is_placeholder(value):
+                    continue
+                if pattern.pattern_id == "basic-auth-url" and _is_local_credential_url(
+                    line, value
+                ):
                     continue
                 dedupe_key = (pattern.pattern_id, lineno)
                 if dedupe_key in seen:
@@ -171,6 +218,8 @@ def scan_text(text: str, *, max_findings: int = 50) -> list[SecretMatch]:
             if INDIRECTION.match(value) or is_placeholder(value):
                 continue
             if _looks_like_path_or_url(value) or _looks_like_code(value):
+                continue
+            if _SOURCE_FILE_KEY.search(key) or _NON_CREDENTIAL_KEY.search(key):
                 continue
             if shannon_entropy(value) < ENTROPY_THRESHOLD:
                 continue

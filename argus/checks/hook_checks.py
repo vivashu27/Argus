@@ -36,6 +36,65 @@ def _hook_text(asset: Asset) -> str:
     return asset.text or asset.data.get("command") or ""
 
 
+#: Reaching one of these while scanning backwards means the interpolation sits bare
+#: on the command line rather than inside a double-quoted word.
+_BARE_BOUNDARY = frozenset(" \t\n(;&|<>")
+
+_ASSIGNED_NAME = re.compile(r"([A-Za-z_]\w*)=$")
+
+
+def _quoting(command: str, start: int) -> str:
+    """How the interpolation at ``start`` is embedded: quoted, assignment, or bare.
+
+    Scanning backwards to the nearest quote or word boundary answers the question the
+    finding actually depends on — is *this* value shell-split — rather than whether
+    the command quotes something, anything, somewhere.
+    """
+    index = start - 1
+    while index >= 0:
+        char = command[index]
+        if char == '"':
+            return "quoted"
+        if char == "=":
+            # ``name=$(...)`` never word-splits in any POSIX shell, so the capture
+            # itself is safe. Whether the value is dangerous depends on how the
+            # variable is later used, which the caller follows up separately.
+            return "assignment"
+        if char in _BARE_BOUNDARY:
+            return "bare"
+        index -= 1
+    return "bare"
+
+
+def _bare_interpolations(command: str, agent_input: re.Pattern[str]) -> list[str]:
+    """Agent-controlled values that reach the command line unquoted.
+
+    Follows one level of indirection: a value captured into a variable is traced to
+    that variable's own uses, because ``file=$(jq ...)`` followed by an unquoted
+    ``$file`` is the same hazard written in two steps.
+    """
+    bare: list[str] = []
+    assigned: set[str] = set()
+
+    for match in agent_input.finditer(command):
+        placement = _quoting(command, match.start())
+        if placement == "bare":
+            bare.append(match.group(0)[:60])
+        elif placement == "assignment":
+            name = _ASSIGNED_NAME.search(command[: match.start()])
+            if name:
+                assigned.add(name.group(1))
+
+    for variable in sorted(assigned):
+        for use in re.finditer(rf"\$\{{?{re.escape(variable)}\}}?(?!\w)", command):
+            is_reassignment = use.start() > 0 and command[use.start() - 1] == "="
+            if not is_reassignment and _quoting(command, use.start()) == "bare":
+                bare.append(use.group(0))
+                break
+
+    return bare
+
+
 @register
 class HookUnvalidatedInterpolation(Check):
     meta = CheckMeta(
@@ -78,9 +137,6 @@ class HookUnvalidatedInterpolation(Check):
         r"\$\(\s*jq[^)]*\)|`[^`]*jq[^`]*`",
         re.I,
     )
-    #: Interpolation that is already inside double quotes is materially safer.
-    QUOTED = re.compile(r'"[^"]*\$\{?[A-Z_]+\}?[^"]*"')
-
     def run(self, context: CheckContext) -> list[Finding]:
         assets = _hooks(context)
         if not assets:
@@ -89,14 +145,13 @@ class HookUnvalidatedInterpolation(Check):
         findings: list[Finding] = []
         for asset in assets:
             command = asset.data.get("command") or ""
-            matches = self.AGENT_INPUT.findall(command)
-            if not matches:
+            if not self.AGENT_INPUT.search(command):
                 findings.append(
                     self.ok(asset.asset_id, "Hook command interpolates no agent-controlled input.")
                 )
                 continue
 
-            quoted = bool(self.QUOTED.search(command))
+            bare = _bare_interpolations(command, self.AGENT_INPUT)
             evidence = [
                 self.evidence(
                     path=asset.path,
@@ -104,19 +159,35 @@ class HookUnvalidatedInterpolation(Check):
                     key=f"hooks.{asset.data.get('event')}.command",
                     snippet=command[:200],
                     reason=(
-                        "Agent-controlled value interpolated into a shell command"
-                        + (" (quoted, but still shell-parsed)" if quoted else " without quoting")
+                        f"Agent-controlled value reaches the command line unquoted: {bare[0]}"
+                        if bare
+                        else "Agent-controlled value interpolated, but every use is quoted"
                     ),
                 )
             ]
-            findings.append(
-                self.fail(
-                    asset.asset_id,
-                    "Hook builds a shell command from agent-controlled input.",
-                    evidence,
-                    confidence=Confidence.MEDIUM if quoted else Confidence.HIGH,
+            if bare:
+                findings.append(
+                    self.fail(
+                        asset.asset_id,
+                        "Hook builds a shell command from agent-controlled input without quoting.",
+                        evidence,
+                        confidence=Confidence.HIGH,
+                    )
                 )
-            )
+            else:
+                # A quoted interpolation does not word-split and cannot start a new
+                # command, so this is not injection. Formatter hooks that quote
+                # correctly are ordinary practice and must not be reported as an
+                # incident — but the hook does handle model-influenced data, which is
+                # worth a reviewer's attention.
+                findings.append(
+                    self.warn(
+                        asset.asset_id,
+                        "Hook passes agent-controlled input to a shell command, quoted.",
+                        evidence,
+                        confidence=Confidence.MEDIUM,
+                    )
+                )
         return findings
 
 
