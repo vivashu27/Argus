@@ -45,6 +45,12 @@ argus.yaml
 project_outline.txt
 claude_session
 
+# This machine's own agent configuration. settings.json here held absolute paths
+# under /home/<user>, and the CLAUDE.md was a duplicate of the tracked one at the
+# repository root. Anchored so it covers only this directory, not a .claude/
+# belonging to a fixture or an example.
+/.claude/
+
 # Local rule authoring — personal templates, not part of the project.
 # Anchored. Unanchored, this matched at every depth and was quietly ignoring nine
 # tracked files under argus/rules/ and examples/rules/ — so a new module added
