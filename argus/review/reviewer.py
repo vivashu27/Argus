@@ -37,6 +37,11 @@ class Verdict:
     confidence: str
     quote: str
     reason: str
+    #: Where the quote came from, resolved while the payload is still in hand. The
+    #: checks cannot work this out later — by then the mapping from payload text
+    #: back to a file has been discarded.
+    path: str | None = None
+    line: int | None = None
 
 
 @dataclass
@@ -116,13 +121,16 @@ def parse_response(text: str, payload: Payload) -> tuple[list[Verdict], list[str
             if len(quote) < MIN_QUOTE_CHARS:
                 discarded.append(f"{check_id}: quote too short to verify")
                 continue
-            if quote not in payload.body:
+            # Whitespace-insensitive: hard-wrapped prose is quoted back as one
+            # flowing sentence, and rejecting that would drop real findings.
+            if payload.find(quote) < 0:
                 discarded.append(f"{check_id}: quote does not appear in the component")
                 continue
             if not reason:
                 discarded.append(f"{check_id}: no reason given")
                 continue
 
+        source, line = payload.locate(quote) if quote else (None, None)
         verdicts.append(
             Verdict(
                 check_id=check_id,
@@ -130,6 +138,8 @@ def parse_response(text: str, payload: Payload) -> tuple[list[Verdict], list[str
                 confidence=_normalise(item.get("confidence"), ("HIGH", "MEDIUM", "LOW"), "LOW"),
                 quote=quote,
                 reason=reason,
+                path=str(source) if source else None,
+                line=line,
             )
         )
 

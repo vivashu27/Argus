@@ -34,6 +34,13 @@ Argus Security Report*
 # Local scanner configuration
 argus.yaml
 
+# Credentials. Argus reads provider keys from the environment only, so a .env here
+# is a local convenience file and must never be committed — this repository is
+# public, and `git add -A` does not ask.
+.env
+.env.*
+!.env.example
+
 # Local working files, not part of the project
 project_outline.txt
 claude_session

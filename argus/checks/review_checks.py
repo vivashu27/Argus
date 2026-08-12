@@ -118,11 +118,15 @@ class ReviewCheck(Check):
                         verdict.reason,
                         [
                             Evidence(
-                                path=None,
+                                path=verdict.path,
+                                line=verdict.line,
                                 key=self.meta.check_id.lower(),
                                 snippet=verdict.quote[:400],
                                 reason=(
-                                    f"Quoted verbatim from the component and verified "
+                                    "Quoted verbatim from the component and located in "
+                                    f"the source — reviewed by {review.model}"
+                                    if verdict.line
+                                    else "Quoted verbatim from the component and verified "
                                     f"present — reviewed by {review.model}"
                                 ),
                             )
