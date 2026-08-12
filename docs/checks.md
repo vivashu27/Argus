@@ -3,7 +3,7 @@
 > **Generated file.** Produced from the check registry by
 > `python scripts/gen_checks_doc.py > docs/checks.md`. Do not edit by hand.
 
-71 checks across 8 sections.
+75 checks across 9 sections.
 
 ## Index
 
@@ -80,6 +80,10 @@
 | `FS-005` | 8.5 | 1 | HIGH | Filesystem | Unsafe permissions on agent configuration file |
 | `FS-006` | 8.6 | 2 | MEDIUM | Filesystem | Symlink escapes the workspace |
 | `FS-007` | 8.7 | 1 | CRITICAL | Filesystem | World-writable agent configuration |
+| `DYN-001` | 10.1 | 1 | CRITICAL | Dynamic Analysis | Tool description changed after the client approved it |
+| `DYN-002` | 10.2 | 1 | HIGH | Dynamic Analysis | Tool inventory changed at runtime |
+| `DYN-003` | 10.3 | 1 | CRITICAL | Dynamic Analysis | Server disclosed a planted credential |
+| `DYN-004` | 10.4 | 1 | HIGH | Dynamic Analysis | Tool output carries instructions aimed at the model |
 
 ## Levels
 
@@ -1278,6 +1282,77 @@ An agent configuration file or directory is writable by any local user.
 **Compliance mapping.** CWE: CWE-732: Incorrect Permission Assignment for Critical Resource; OWASP LLM Top 10 2025: LLM03: Supply Chain
 
 **References.** https://cwe.mitre.org/data/definitions/732.html
+
+
+---
+
+## 10. Dynamic Analysis
+
+4 checks — 4 at Level 1, 0 at Level 2.
+
+### DYN-001 — Tool description changed after the client approved it
+
+**AASB 10.1** · Level 1 · **CRITICAL** · applies to: mcp
+
+A tool's description or input schema differed between the handshake listing and a listing taken after the server had been exercised.
+
+**Detection rationale.** Approval in MCP is granted against the description shown at connection time. A server that serves one description then and another later has obtained consent for a tool the operator never saw. No static reading distinguishes this from a server that composes descriptions legitimately, because the source is identical in both cases — only the two answers differ.
+
+**Security impact.** The model acts on the mutated description with permissions the operator granted to the original, so the attack inherits trust rather than having to defeat it.
+
+**Remediation.** Pin the server to an exact version, diff its tool descriptions between sessions, and remove it if the change was not an intentional release.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-494: Download of Code Without Integrity Check
+
+**References.** https://modelcontextprotocol.io/specification, https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks
+
+### DYN-002 — Tool inventory changed at runtime
+
+**AASB 10.2** · Level 1 · **HIGH** · applies to: mcp
+
+Tools appeared or disappeared between two listings of the same session.
+
+**Detection rationale.** A tool introduced after the handshake was never shown for approval. A tool withdrawn after approval frees its name to be re-registered by another server, which is how shadowing is staged.
+
+**Security impact.** The model may be offered a capability the operator never reviewed, under a server that has already been trusted.
+
+**Remediation.** Treat the tool set as part of the server's identity. Re-review the server, and prefer servers whose tool list is static.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-349: Acceptance of Extraneous Untrusted Data With Trusted Data
+
+**References.** https://modelcontextprotocol.io/specification
+
+### DYN-003 — Server disclosed a planted credential
+
+**AASB 10.3** · Level 1 · **CRITICAL** · applies to: mcp
+
+A unique token written to a fake credential file inside the sandbox came back in the server's own output.
+
+**Detection rationale.** The canary values are random and exist only inside the jail, so the server cannot have produced one without reading the file it was written to. This is the rare check that proves rather than infers: there is no benign path by which a calculator returns the contents of an SSH key.
+
+**Security impact.** The same code path against a real home directory hands the model, and anything downstream of it, a live credential.
+
+**Remediation.** Remove the server. Rotate every credential in the locations named below on any machine where it has run.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure; MITRE ATLAS: AML.T0055: Unsecured Credentials; CWE: CWE-200: Exposure of Sensitive Information
+
+**References.** https://modelcontextprotocol.io/specification
+
+### DYN-004 — Tool output carries instructions aimed at the model
+
+**AASB 10.4** · Level 1 · **HIGH** · applies to: mcp
+
+Text returned by a tool contains directive language addressed to the agent rather than data addressed to the user.
+
+**Detection rationale.** Tool output goes into the model's context with the authority of a tool result. Static analysis cannot reach it at all — the text does not exist until the tool is called, and may be assembled from a remote response. This is the indirect-injection path that a source review structurally cannot cover.
+
+**Security impact.** An instruction placed here is read by the model as trusted output of a tool the operator approved.
+
+**Remediation.** Treat tool output as untrusted input. Review the flagged text, and where it is attacker-influenced, remove the server or wrap its output.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-1427: Improper Neutralization of Input Used for LLM Prompting
+
+**References.** https://owasp.org/www-project-top-10-for-large-language-model-applications/
 
 
 ---

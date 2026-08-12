@@ -17,7 +17,7 @@ agent layer rather than cloud accounts or hosts.
 
 ## Read-only by design
 
-Argus treats every discovered file as untrusted input. It **never**:
+`argus scan` treats every discovered file as untrusted input. It **never**:
 
 - modifies configuration, Skills, Plugins, hooks, or user files
 - installs anything
@@ -27,6 +27,11 @@ Argus treats every discovered file as untrusted input. It **never**:
 
 It is intended to be safe to point at a deliberately malicious configuration. See
 [`docs/threat-model.md`](docs/threat-model.md).
+
+> **`argus dynamo` is the one exception, and it is opt-in.** Dynamic analysis works
+> by running the MCP servers it audits, under a sandbox, because the attacks it
+> finds do not exist until the server is running. It refuses to start without
+> `--i-understand-this-executes-code`. See [Dynamic analysis](#dynamic-analysis-argus-dynamo).
 
 ---
 
@@ -347,19 +352,23 @@ fingerprint, so moving code does not churn the file.
 
 ## The benchmark
 
-**AASB v1.0** — 71 checks in 8 sections. Check IDs are canonical; CIS-style numbers are
-derived (`CLAUDE-001` → AASB `1.1`).
+**AASB v1.0** — 71 static checks in 8 sections, plus 4 dynamic checks in section 10.
+Check IDs are canonical; CIS-style numbers are derived (`CLAUDE-001` → AASB `1.1`).
 
-| § | Section | Prefix | Checks |
-|---|---|---|---|
-| 1 | Claude Configuration | `CLAUDE-` | 10 |
-| 2 | MCP Security | `MCP-` | 20 |
-| 3 | Skills | `SKILL-` | 10 |
-| 4 | Plugins | `PLUGIN-` | 8 |
-| 5 | Hooks | `HOOK-` | 6 |
-| 6 | Instruction Files | `INSTR-` | 5 |
-| 7 | Secrets | `SECRET-` | 5 |
-| 8 | Filesystem | `FS-` | 7 |
+| § | Section | Prefix | Checks | Run by |
+|---|---|---|---|---|
+| 1 | Claude Configuration | `CLAUDE-` | 10 | `scan` |
+| 2 | MCP Security | `MCP-` | 20 | `scan` |
+| 3 | Skills | `SKILL-` | 10 | `scan` |
+| 4 | Plugins | `PLUGIN-` | 8 | `scan` |
+| 5 | Hooks | `HOOK-` | 6 | `scan` |
+| 6 | Instruction Files | `INSTR-` | 5 | `scan` |
+| 7 | Secrets | `SECRET-` | 5 | `scan` |
+| 8 | Filesystem | `FS-` | 7 | `scan` |
+| 10 | Dynamic Analysis | `DYN-` | 4 | `dynamo` |
+
+Section 10 is deliberately excluded from `argus scan`, so a static score stays
+comparable across releases and is never mixed with observations from a probe.
 
 **Level 1** — basic hygiene: concrete misconfigurations, low false-positive rate,
 remediation that does not materially reduce usability.
@@ -391,6 +400,45 @@ parameter is attacker-reachable, so both are treated as untrusted. The command s
 parsed as data and **never executed** — Argus still never starts a server, which means
 tool extraction is best-effort and a server it cannot locate reports `MANUAL` naming the
 reason, never `PASS`. See [`docs/benchmark.md`](docs/benchmark.md#mcp-server-code-analysis).
+
+---
+
+## Dynamic analysis (`argus dynamo`)
+
+Some attacks have no static signature. A rug-pull server's source is identical to a
+server that composes its descriptions legitimately — the difference is that one of
+them answers `tools/list` differently the second time. `MCP-019` can flag code that
+*looks* capable of mutating a description; only running the server settles it.
+
+```bash
+argus dynamo --i-understand-this-executes-code
+```
+
+| Check | Finds | Why static analysis cannot |
+|---|---|---|
+| `DYN-001` | Tool description or schema changed after handshake | The source is the same in both states; only the two answers differ |
+| `DYN-002` | Tools appeared or vanished mid-session | The inventory is produced at runtime |
+| `DYN-003` | A planted credential was read and echoed back | Requires observing a real read |
+| `DYN-004` | Injected instructions in tool *output* | The text does not exist until the tool is called |
+
+**Containment.** Each server runs in its own unprivileged
+[bubblewrap](https://github.com/containers/bubblewrap) namespace: host filesystem
+read-only, your real home not mounted, network disabled, a fresh PID namespace that
+dies with the parent. Fake credentials are planted at `~/.ssh/id_rsa`,
+`~/.aws/credentials`, `~/.env` and `~/.claude/.credentials.json`; each carries a
+random token, so a token coming back in tool output is proof of a read, not an
+inference.
+
+**Limits, stated plainly.** A kernel-level namespace escape is not defended against.
+`--allow-network` means exfiltration *succeeds* rather than merely being attempted —
+it exists for reproducing a finding, not for routine use. Servers launched by
+`docker`, `npx` or `uvx` are skipped with a reason, because the sandbox will not nest
+a container or fetch a package. And a dynamic check that finds nothing has watched
+one execution with synthesised arguments, which is far weaker than a static check
+that has read the whole file — so an unprobed server reports `MANUAL`, never `PASS`.
+
+Requires `bubblewrap` (`apt install bubblewrap`). Without a working sandbox, dynamo
+refuses to run rather than falling back to the host.
 
 ---
 

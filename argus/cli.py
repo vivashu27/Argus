@@ -420,6 +420,114 @@ def check(
     )
 
 
+@app.command()
+def dynamo(
+    path: Path | None = typer.Option(None, "--path", "-p", help="Project root to search for MCP servers."),
+    server: list[str] | None = typer.Option(None, "--server", help="Probe only servers whose id contains this. Repeatable."),
+    i_understand: bool = typer.Option(False, "--i-understand-this-executes-code", help="Required. Confirms you accept that dynamo runs the audited servers."),
+    allow_network: bool = typer.Option(False, "--allow-network", help="Give probed servers real network access. Exfiltration will succeed, not merely be attempted."),
+    include_mutating: bool = typer.Option(False, "--include-mutating", help="Also invoke tools whose name suggests they change state."),
+    no_call: bool = typer.Option(False, "--no-call", help="List tools but never invoke them. Weakens DYN-001 and disables DYN-004."),
+    timeout: float = typer.Option(20.0, "--timeout", help="Seconds to wait for any single server response."),
+    fmt: list[str] | None = typer.Option(None, "--format", "-f", help=f"Output format, repeatable. One of: {', '.join(FORMATS)}."),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write reports to this directory."),
+    severity: str | None = typer.Option(None, "--severity", "-s", help="Report gate: show this severity and above."),
+    fail_on: str | None = typer.Option(None, "--fail-on", help="Exit-code gate: fail on this severity and above (default: high)."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show all evidence and the full probe transcript."),
+    exit_zero: bool = typer.Option(False, "--exit-zero", help="Always exit 0 when the probe itself completes."),
+    no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Probe only servers declared under --path."),
+    no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
+) -> None:
+    """Audit MCP servers by running them in a sandbox (AASB section 10, DYN-*).
+
+    Unlike 'scan', this executes the servers it audits. It finds what static
+    reading cannot: descriptions that mutate after approval, tools that appear
+    mid-session, credentials read and echoed back, instructions injected into tool
+    output. Every server runs under an unprivileged namespace with no network, no
+    access to your real home, and fake credentials planted as tripwires.
+    """
+    logger = log.configure(verbose=verbose)
+    global console
+    if no_color:
+        console = Console(no_color=True, force_terminal=False)
+
+    from .dynamic.sandbox import SandboxUnavailable, describe_isolation
+    from .dynamo import run_probes
+
+    if not i_understand:
+        _fail(
+            "dynamo executes the MCP servers it audits. That is the point of the "
+            "module, and it is not safe to do casually.\n\n"
+            "  Re-run with --i-understand-this-executes-code once you have read what "
+            "it does:\n"
+            "    - each server is launched under an unprivileged bubblewrap namespace\n"
+            "    - the host filesystem is read-only and your real home is not mounted\n"
+            "    - the network is disabled unless you pass --allow-network\n"
+            "    - fake credentials are planted to detect reads\n\n"
+            "  A kernel-level namespace escape is not defended against. Do not point "
+            "this at a server you believe is actively malicious on a machine you "
+            "care about."
+        )
+
+    project_root = (path or Path.cwd()).expanduser()
+    if not project_root.exists():
+        _fail(f"path does not exist: {project_root}")
+
+    try:
+        probes, found, reference = run_probes(
+            project_root,
+            user_scope=not no_user_scope,
+            only=set(server) if server else None,
+            network=allow_network,
+            timeout=timeout,
+            call_tools=not no_call,
+            include_mutating=include_mutating,
+        )
+    except SandboxUnavailable as exc:
+        _fail(f"no usable sandbox: {exc}", EXIT_SCANNER_ERROR)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"probe failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
+
+    err_console.print(Text("sandbox", style="bold"))
+    for line in describe_isolation(reference):
+        err_console.print(Text(f"  {line}", style="dim"))
+    probed = sum(1 for p in probes if p.started)
+    err_console.print(
+        Text(f"  probed {probed} of {len(found)} discovered server(s)\n", style="dim")
+    )
+    if allow_network:
+        err_console.print(
+            Text("  WARNING: --allow-network is set. A malicious server can reach the "
+                 "internet from inside the sandbox.\n", style="bold yellow")
+        )
+    logger.debug("probe candidates: %s", [c.server_id for c in found])
+
+    options = ScanOptions(
+        project_root=project_root,
+        categories={Category.DYNAMIC},
+        user_scope=not no_user_scope,
+        probes=probes,
+        verbose=verbose,
+    )
+    try:
+        report = run_scan(options)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"scoring failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
+
+    if severity:
+        report.result.findings = filter_for_display(
+            report.result.findings, Severity.parse(severity)
+        )
+    _emit(report, fmt or ["terminal"], output, verbose)
+
+    if exit_zero:
+        raise typer.Exit(EXIT_OK)
+    gate = Severity.parse(fail_on) if fail_on else Severity.HIGH
+    raise typer.Exit(
+        EXIT_FINDINGS if gating_findings(report.result.findings, gate) else EXIT_OK
+    )
+
+
 rule_app = typer.Typer(
     name="rule",
     help="Create, validate and test custom .argus rules.",

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from . import (  # noqa: F401  (imported for registration side effects)
     claude_checks,
+    dynamic_checks,
     filesystem_checks,
     hook_checks,
     instruction_checks,
@@ -27,4 +28,5 @@ __all__ = [
     "instruction_checks",
     "secret_checks",
     "filesystem_checks",
+    "dynamic_checks",
 ]

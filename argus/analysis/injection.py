@@ -207,6 +207,19 @@ _SECURITY_DOC = re.compile(
 )
 _SECURITY_DOC_THRESHOLD = 3
 
+_URL_TOKEN = re.compile(r"\b(?:https?|ftps?)://\S+|\b[\w.-]+\.(?:com|net|org|io|dev|sh)\b", re.I)
+
+
+def _strip_urls(window: str) -> str:
+    """Remove URLs before testing for documentation language.
+
+    ``collector.example.net`` contains the word "example", and RFC 2606 placeholder
+    domains appear in real payloads at least as often as in real documentation. A
+    hostname is not a statement that the surrounding line is illustrative, so
+    letting one discount a match suppressed genuine exfiltration directives.
+    """
+    return _URL_TOKEN.sub(" ", window)
+
 #: A lead-in that turns the list beneath it into a list of prohibitions. "Claude Code
 #: must never:" followed by bullets is one of the most common shapes in real
 #: instruction files, and each bullet inherits the negation from the heading rather
@@ -279,13 +292,24 @@ def is_security_document(text: str) -> bool:
 
 
 def scan_text(
-    text: str, *, max_findings: int = 40, line_offset: int = 0
+    text: str,
+    *,
+    max_findings: int = 40,
+    line_offset: int = 0,
+    trust_formatting: bool = True,
 ) -> list[InjectionMatch]:
     """Scan text for potential prompt-injection language.
 
     ``line_offset`` is added to every reported line number, so callers scanning a
     slice of a file (a Skill body after its frontmatter, say) still report line
     numbers that resolve against the original file.
+
+    ``trust_formatting`` controls whether a code fence or blockquote is allowed to
+    excuse a match. It holds for files a human wrote and reviewed, where fencing
+    genuinely marks an illustration. It must be turned off for text the audited
+    component *produced* — tool output, a fetched page — because there the attacker
+    chooses the formatting, and wrapping a payload in a fence would otherwise be a
+    one-character bypass. The semantic discounts still apply either way.
     """
     matches: list[InjectionMatch] = []
     seen: set[tuple[str, int]] = set()
@@ -306,11 +330,11 @@ def scan_text(
 
         # A phrase inside a code fence, a quote, or an explicitly labelled example is
         # far more likely to be documentation than a live directive.
-        window = " ".join(lines[max(0, index - 3) : index + 1])
+        window = _strip_urls(" ".join(lines[max(0, index - 3) : index + 1]))
         base_reason = ""
-        if in_fence:
+        if in_fence and trust_formatting:
             base_reason = "inside a code fence"
-        elif line.lstrip().startswith(">"):
+        elif line.lstrip().startswith(">") and trust_formatting:
             base_reason = "inside a blockquote"
         elif _DISCOUNT_MARKERS.search(window):
             base_reason = "adjacent to example or detection-description language"

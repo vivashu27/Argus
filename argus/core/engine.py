@@ -80,6 +80,10 @@ class ScanOptions:
     rules_only: bool = False
     triage_path: Path | None = None
     verbose: bool = False
+    #: Runtime observations from ``argus dynamo``. Typed loosely so that importing
+    #: the engine never pulls in the subprocess machinery of :mod:`argus.dynamic`;
+    #: an ordinary scan must not carry the code that executes servers.
+    probes: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -127,12 +131,20 @@ def run_scan(options: ScanOptions) -> ScanReport:
 
     # 4-5. Static analysis and security checks. Discovery still runs in full under
     # rules_only: rules match against assets, so they need the same inventory.
+    # Dynamic checks report on a probe. Without one they would add a row per check
+    # to every ordinary scan saying nothing was observed, and shift the benchmark
+    # denominator that scores are compared against. An operator who names the
+    # category explicitly still gets them, and gets told why they are empty.
+    categories = options.categories
+    if categories is None and not options.probes:
+        categories = {c for c in Category if c is not Category.DYNAMIC}
+
     checks = (
         []
         if options.rules_only
         else select(
             targets=options.targets,
-            categories=options.categories,
+            categories=categories,
             include_ids=options.include_ids,
             exclude_ids=options.exclude_ids,
             level=options.level,
@@ -142,7 +154,7 @@ def run_scan(options: ScanOptions) -> ScanReport:
         assets=assets,
         project_root=options.project_root,
         home=home,
-        options={"verbose": options.verbose},
+        options={"verbose": options.verbose, "dynamic_probes": list(options.probes)},
     )
 
     findings: list[Finding] = []

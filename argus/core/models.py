@@ -68,6 +68,7 @@ class Category(str, Enum):
     SECRETS = "secrets"
     FILESYSTEM = "filesystem"
     CUSTOM = "custom"
+    DYNAMIC = "dynamic"
 
     @property
     def section(self) -> int:
@@ -98,6 +99,7 @@ _CATEGORY_SECTION: dict[Category, int] = {
     Category.SECRETS: 7,
     Category.FILESYSTEM: 8,
     Category.CUSTOM: 9,
+    Category.DYNAMIC: 10,
 }
 
 _CATEGORY_DISPLAY: dict[Category, str] = {
@@ -110,6 +112,7 @@ _CATEGORY_DISPLAY: dict[Category, str] = {
     Category.SECRETS: "Secrets",
     Category.FILESYSTEM: "Filesystem",
     Category.CUSTOM: "Custom Rules",
+    Category.DYNAMIC: "Dynamic Analysis",
 }
 
 
