@@ -422,8 +422,9 @@ def check(
 
 @app.command()
 def dynamo(
-    path: Path | None = typer.Option(None, "--path", "-p", help="Project root to search for MCP servers."),
-    server: list[str] | None = typer.Option(None, "--server", help="Probe only servers whose id contains this. Repeatable."),
+    path: Path | None = typer.Option(None, "--path", "-p", help="Project root to search for components."),
+    target: list[str] | None = typer.Option(None, "--target", "-t", help="Limit to 'mcp' or 'hooks'. Default: both."),
+    server: list[str] | None = typer.Option(None, "--server", help="Probe only components whose id contains this. Repeatable."),
     i_understand: bool = typer.Option(False, "--i-understand-this-executes-code", help="Required. Confirms you accept that dynamo runs the audited servers."),
     allow_network: bool = typer.Option(False, "--allow-network", help="Give probed servers real network access. Exfiltration will succeed, not merely be attempted."),
     include_mutating: bool = typer.Option(False, "--include-mutating", help="Also invoke tools whose name suggests they change state."),
@@ -438,13 +439,14 @@ def dynamo(
     no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Probe only servers declared under --path."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
 ) -> None:
-    """Audit MCP servers by running them in a sandbox (AASB section 10, DYN-*).
+    """Audit MCP servers and hooks by running them in a sandbox (AASB section 10).
 
-    Unlike 'scan', this executes the servers it audits. It finds what static
+    Unlike 'scan', this executes the components it audits. It finds what static
     reading cannot: descriptions that mutate after approval, tools that appear
     mid-session, credentials read and echoed back, instructions injected into tool
-    output. Every server runs under an unprivileged namespace with no network, no
-    access to your real home, and fake credentials planted as tripwires.
+    output or into the model's context by a hook, and configuration rewritten for
+    persistence. Everything runs under an unprivileged namespace with no network,
+    no access to your real home, and fake credentials planted as tripwires.
     """
     logger = log.configure(verbose=verbose)
     global console
@@ -456,16 +458,16 @@ def dynamo(
 
     if not i_understand:
         _fail(
-            "dynamo executes the MCP servers it audits. That is the point of the "
-            "module, and it is not safe to do casually.\n\n"
+            "dynamo executes the MCP servers and hooks it audits. That is the point "
+            "of the module, and it is not safe to do casually.\n\n"
             "  Re-run with --i-understand-this-executes-code once you have read what "
             "it does:\n"
-            "    - each server is launched under an unprivileged bubblewrap namespace\n"
+            "    - each component is launched under an unprivileged bubblewrap namespace\n"
             "    - the host filesystem is read-only and your real home is not mounted\n"
             "    - the network is disabled unless you pass --allow-network\n"
             "    - fake credentials are planted to detect reads\n\n"
             "  A kernel-level namespace escape is not defended against. Do not point "
-            "this at a server you believe is actively malicious on a machine you "
+            "this at a component you believe is actively malicious on a machine you "
             "care about."
         )
 
@@ -473,11 +475,22 @@ def dynamo(
     if not project_root.exists():
         _fail(f"path does not exist: {project_root}")
 
+    targets = _parse_enum_list(target, Target.parse, "target")
+    if targets and targets - {Target.MCP, Target.HOOKS}:
+        unsupported = ", ".join(sorted(t.value for t in targets - {Target.MCP, Target.HOOKS}))
+        _fail(
+            f"dynamo cannot probe: {unsupported}. Only 'mcp' and 'hooks' are "
+            "processes that can be executed and observed. Skills and instruction "
+            "files are context rather than code — nothing runs them but a model — so "
+            "they stay with 'argus scan'."
+        )
+
     try:
-        probes, found, reference = run_probes(
+        run = run_probes(
             project_root,
             user_scope=not no_user_scope,
             only=set(server) if server else None,
+            targets=targets,
             network=allow_network,
             timeout=timeout,
             call_tools=not no_call,
@@ -489,24 +502,28 @@ def dynamo(
         _fail(f"probe failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
 
     err_console.print(Text("sandbox", style="bold"))
-    for line in describe_isolation(reference):
+    for line in describe_isolation(run.sandbox):
         err_console.print(Text(f"  {line}", style="dim"))
-    probed = sum(1 for p in probes if p.started)
     err_console.print(
-        Text(f"  probed {probed} of {len(found)} discovered server(s)\n", style="dim")
+        Text(
+            f"  executed {run.executed} of {run.attempted} component(s): "
+            f"{len(run.servers)} MCP server(s), {len(run.hooks)} hook(s)\n",
+            style="dim",
+        )
     )
     if allow_network:
         err_console.print(
             Text("  WARNING: --allow-network is set. A malicious server can reach the "
                  "internet from inside the sandbox.\n", style="bold yellow")
         )
-    logger.debug("probe candidates: %s", [c.server_id for c in found])
+    logger.debug("probe candidates: %s", [c.server_id for c in run.candidates])
 
     options = ScanOptions(
         project_root=project_root,
         categories={Category.DYNAMIC},
         user_scope=not no_user_scope,
-        probes=probes,
+        probes=run.servers,
+        hook_probes=run.hooks,
         verbose=verbose,
     )
     try:

@@ -25,6 +25,7 @@ from ..core.models import (
     Target,
 )
 from ..core.registry import register
+from ..dynamic.hook_runner import HookProbe
 from ..dynamic.probe import ProbeResult, ToolSnapshot
 from .base import Check, CheckContext
 
@@ -390,5 +391,342 @@ class InjectedInstructionsInOutput(DynamicCheck):
                         "--no-call, or with --include-mutating if every tool was "
                         "skipped as state-changing.",
                     )
+                )
+        return findings
+
+
+# --------------------------------------------------------------------------- #
+# Hooks. A hook fires on an event rather than on a model's decision, so nothing
+# stands between a malicious one and execution.
+# --------------------------------------------------------------------------- #
+
+HOOK_PROBE_KEY = "dynamic_hook_probes"
+
+
+def _hook_probes(context: CheckContext) -> list[HookProbe]:
+    probes = context.options.get(HOOK_PROBE_KEY)
+    return list(probes) if isinstance(probes, list) else []
+
+
+class HookDynamicCheck(Check):
+    """Iterate executed hooks, reporting the ones that never ran rather than
+    counting them as clean."""
+
+    def _for_each(self, context: CheckContext) -> tuple[list[HookProbe], list[Finding]]:
+        probes = _hook_probes(context)
+        if not probes:
+            return [], self.no_assets("executed hooks")
+
+        findings: list[Finding] = []
+        usable: list[HookProbe] = []
+        for probe in probes:
+            if probe.usable:
+                usable.append(probe)
+                continue
+            findings.append(
+                self.manual(
+                    probe.hook_id,
+                    "Hook could not be executed, so this check has no observation to "
+                    f"report: {probe.reason or 'no reason recorded'}.",
+                    [
+                        Evidence(path=None, key="command", snippet=probe.command[:200],
+                                 reason="Command Argus attempted to run under the sandbox")
+                    ],
+                )
+            )
+        return usable, findings
+
+
+@register
+class HookCanaryDisclosure(HookDynamicCheck):
+    meta = CheckMeta(
+        check_id="DYN-005",
+        title="Hook read and disclosed a planted credential",
+        description=(
+            "A hook returned, or wrote out, a unique token that existed only inside a "
+            "fake credential file in the sandbox."
+        ),
+        category=Category.DYNAMIC,
+        severity=Severity.CRITICAL,
+        aasb_level=1,
+        applies_to=frozenset({Target.HOOKS}),
+        rationale=(
+            "The token is random and exists only in the jail, so the hook cannot have "
+            "produced it without reading the file. Hooks run automatically on an "
+            "event, so unlike a tool call there is no approval step and no model "
+            "decision that a user could decline."
+        ),
+        security_impact=(
+            "Against a real home directory the same hook hands out a live credential "
+            "on every matching event, with no prompt and no transcript entry the user "
+            "is likely to read."
+        ),
+        remediation=(
+            "Remove the hook from settings and rotate every credential in the "
+            "locations named below on any machine where it has fired."
+        ),
+        references=("https://docs.anthropic.com/en/docs/claude-code/hooks",),
+        compliance=(
+            ("OWASP LLM Top 10 2025", "LLM02: Sensitive Information Disclosure"),
+            ("MITRE ATLAS", "AML.T0055: Unsecured Credentials"),
+            ("CWE", "CWE-200: Exposure of Sensitive Information"),
+        ),
+    )
+
+    def run(self, context: CheckContext) -> list[Finding]:
+        probes, findings = self._for_each(context)
+        for probe in probes:
+            if probe.canary_hits:
+                findings.append(
+                    self.fail(
+                        probe.hook_id,
+                        f"{len(probe.canary_hits)} planted credential(s) were read and "
+                        f"disclosed by the {probe.event} hook.",
+                        [
+                            Evidence(
+                                path=None,
+                                key=f"canary.{canary.relative}",
+                                snippet=f"~/{canary.relative} disclosed via {source}",
+                                reason=f"{canary.description} — token planted by Argus "
+                                       "was echoed back",
+                            )
+                            for canary, source in probe.canary_hits[:8]
+                        ],
+                        confidence=Confidence.HIGH,
+                    )
+                )
+            else:
+                findings.append(
+                    self.ok(probe.hook_id, "No planted credential appeared in output.")
+                )
+        return findings
+
+
+@register
+class HookContextInjection(HookDynamicCheck):
+    meta = CheckMeta(
+        check_id="DYN-006",
+        title="Hook injected instructions into the model's context",
+        description=(
+            "Text a hook emitted on a route that re-enters the model's context "
+            "contained directive language aimed at the agent."
+        ),
+        category=Category.DYNAMIC,
+        severity=Severity.HIGH,
+        aasb_level=1,
+        applies_to=frozenset({Target.HOOKS}),
+        rationale=(
+            "Three routes carry hook output back into context: stdout on the events "
+            "that feed context, stderr on exit code 2, and additionalContext in a JSON "
+            "response. Text arriving that way is indistinguishable to the model from "
+            "the agent's own reasoning. Static reading cannot cover it because the "
+            "text may be assembled at runtime from a fetch or a decode."
+        ),
+        security_impact=(
+            "An instruction placed here is executed with the user's full session "
+            "authority and reappears on every matching event."
+        ),
+        remediation=(
+            "Review the flagged text. A hook should return data or a decision, never "
+            "instructions addressed to the model."
+        ),
+        references=("https://docs.anthropic.com/en/docs/claude-code/hooks",),
+        compliance=(
+            ("OWASP LLM Top 10 2025", "LLM01: Prompt Injection"),
+            ("MITRE ATLAS", "AML.T0051: LLM Prompt Injection"),
+            ("CWE", "CWE-1427: Improper Neutralization of Input Used for LLM Prompting"),
+        ),
+    )
+
+    def run(self, context: CheckContext) -> list[Finding]:
+        probes, findings = self._for_each(context)
+        for probe in probes:
+            text = probe.context_text
+            evidence = [
+                Evidence(
+                    path=None,
+                    key=f"hooks.{probe.event}.context",
+                    snippet=match.context,
+                    reason=f"{match.description} ({match.confidence}) on a route that "
+                           "reaches the model's context",
+                )
+                # trust_formatting=False: the hook chose this formatting, so a fenced
+                # payload is an evasion attempt rather than an illustration.
+                for match in injection.scan_text(text, trust_formatting=False)
+                if match.is_actionable
+            ] if text.strip() else []
+
+            if evidence:
+                findings.append(
+                    self.fail(
+                        probe.hook_id,
+                        f"{len(evidence)} injected instruction(s) reach the model from "
+                        f"this {probe.event} hook.",
+                        evidence[:8],
+                        confidence=Confidence.HIGH,
+                    )
+                )
+            else:
+                findings.append(
+                    self.ok(
+                        probe.hook_id,
+                        "Nothing this hook emitted into context reads as a directive.",
+                    )
+                )
+        return findings
+
+
+@register
+class HookSilentApproval(HookDynamicCheck):
+    meta = CheckMeta(
+        check_id="DYN-007",
+        title="Hook auto-approves tool calls",
+        description=(
+            "A PreToolUse hook returned permissionDecision 'allow', granting a tool "
+            "call without the user being asked."
+        ),
+        category=Category.DYNAMIC,
+        severity=Severity.HIGH,
+        aasb_level=1,
+        applies_to=frozenset({Target.HOOKS}),
+        rationale=(
+            "A PreToolUse hook can settle the permission prompt on the user's behalf. "
+            "Returning 'allow' for a synthetic, entirely unremarkable tool call means "
+            "the decision is not conditional on anything Argus varied — which is the "
+            "shape of a blanket bypass rather than a considered policy. The decision "
+            "is computed at runtime, so the source may show only that a decision is "
+            "returned, not which one."
+        ),
+        security_impact=(
+            "The approval gate that the whole permission system depends on is answered "
+            "automatically, and the user sees no prompt."
+        ),
+        remediation=(
+            "Restrict the hook to the specific tool invocations it is meant to "
+            "pre-approve, and return 'ask' as the default rather than 'allow'."
+        ),
+        references=("https://docs.anthropic.com/en/docs/claude-code/hooks",),
+        compliance=(
+            ("OWASP LLM Top 10 2025", "LLM06: Excessive Agency"),
+            ("CWE", "CWE-863: Incorrect Authorization"),
+        ),
+    )
+
+    def run(self, context: CheckContext) -> list[Finding]:
+        probes, findings = self._for_each(context)
+        for probe in probes:
+            if probe.event != "PreToolUse":
+                findings.append(
+                    self.not_applicable(
+                        probe.hook_id,
+                        f"{probe.event} hooks cannot return a permission decision",
+                    )
+                )
+            elif probe.decision.lower() == "allow":
+                findings.append(
+                    self.fail(
+                        probe.hook_id,
+                        "Hook approved a synthetic tool call without user interaction.",
+                        [
+                            Evidence(
+                                path=None,
+                                key="hookSpecificOutput.permissionDecision",
+                                snippet=f"allow — {probe.decision_reason or 'no reason given'}",
+                                reason="Returned for an unremarkable probe invocation, "
+                                       "so the approval is not conditional",
+                            )
+                        ],
+                        confidence=Confidence.MEDIUM,
+                    )
+                )
+            else:
+                findings.append(
+                    self.ok(
+                        probe.hook_id,
+                        f"Returned {probe.decision or 'no decision'} for the probe call.",
+                    )
+                )
+        return findings
+
+
+@register
+class RuntimeConfigTampering(Check):
+    meta = CheckMeta(
+        check_id="DYN-008",
+        title="Component rewrote agent configuration while running",
+        description=(
+            "A probed hook or MCP server modified the settings, MCP registry or "
+            "instruction file planted in the sandbox."
+        ),
+        category=Category.DYNAMIC,
+        severity=Severity.CRITICAL,
+        aasb_level=1,
+        applies_to=frozenset({Target.HOOKS, Target.MCP}),
+        rationale=(
+            "Nothing legitimately edits the agent's own configuration as a side effect "
+            "of answering a tool call or handling an event. Writing to settings.json "
+            "is how a single execution becomes a standing foothold: the component adds "
+            "a hook, an MCP server, or a line of CLAUDE.md that survives the session "
+            "and re-establishes itself."
+        ),
+        security_impact=(
+            "Persistence. The change outlives the process that made it and takes "
+            "effect on every subsequent session, including after the original "
+            "component is removed."
+        ),
+        remediation=(
+            "Treat the machine as compromised: diff ~/.claude/settings.json, "
+            "~/.claude.json and every CLAUDE.md against version control, then remove "
+            "the component."
+        ),
+        references=("https://docs.anthropic.com/en/docs/claude-code/settings",),
+        compliance=(
+            ("OWASP LLM Top 10 2025", "LLM06: Excessive Agency"),
+            ("MITRE ATLAS", "AML.T0018: Manipulate AI Model"),
+            ("CWE", "CWE-732: Incorrect Permission Assignment for Critical Resource"),
+        ),
+    )
+
+    def run(self, context: CheckContext) -> list[Finding]:
+        subjects: list[tuple[str, list[str], bool, str]] = [
+            (p.server_id, p.config_changes, p.usable, p.reason) for p in _probes(context)
+        ] + [
+            (p.hook_id, p.config_changes, p.usable, p.reason) for p in _hook_probes(context)
+        ]
+        if not subjects:
+            return self.no_assets("probed components")
+
+        findings: list[Finding] = []
+        for subject_id, changes, usable, reason in subjects:
+            if not usable:
+                findings.append(
+                    self.manual(
+                        subject_id,
+                        "Component did not run, so configuration tampering could not be "
+                        f"observed: {reason or 'no reason recorded'}.",
+                    )
+                )
+            elif changes:
+                findings.append(
+                    self.fail(
+                        subject_id,
+                        f"{len(changes)} agent configuration file(s) were modified while "
+                        "this component ran.",
+                        [
+                            Evidence(
+                                path=None,
+                                key=relative,
+                                snippet=f"~/{relative}",
+                                reason="Planted configuration differs from how it was "
+                                       "written before the component ran",
+                            )
+                            for relative in changes
+                        ],
+                        confidence=Confidence.HIGH,
+                    )
+                )
+            else:
+                findings.append(
+                    self.ok(subject_id, "Agent configuration untouched.")
                 )
         return findings

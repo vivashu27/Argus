@@ -3,7 +3,7 @@
 > **Generated file.** Produced from the check registry by
 > `python scripts/gen_checks_doc.py > docs/checks.md`. Do not edit by hand.
 
-75 checks across 9 sections.
+79 checks across 9 sections.
 
 ## Index
 
@@ -84,6 +84,10 @@
 | `DYN-002` | 10.2 | 1 | HIGH | Dynamic Analysis | Tool inventory changed at runtime |
 | `DYN-003` | 10.3 | 1 | CRITICAL | Dynamic Analysis | Server disclosed a planted credential |
 | `DYN-004` | 10.4 | 1 | HIGH | Dynamic Analysis | Tool output carries instructions aimed at the model |
+| `DYN-005` | 10.5 | 1 | CRITICAL | Dynamic Analysis | Hook read and disclosed a planted credential |
+| `DYN-006` | 10.6 | 1 | HIGH | Dynamic Analysis | Hook injected instructions into the model's context |
+| `DYN-007` | 10.7 | 1 | HIGH | Dynamic Analysis | Hook auto-approves tool calls |
+| `DYN-008` | 10.8 | 1 | CRITICAL | Dynamic Analysis | Component rewrote agent configuration while running |
 
 ## Levels
 
@@ -1288,7 +1292,7 @@ An agent configuration file or directory is writable by any local user.
 
 ## 10. Dynamic Analysis
 
-4 checks — 4 at Level 1, 0 at Level 2.
+8 checks — 8 at Level 1, 0 at Level 2.
 
 ### DYN-001 — Tool description changed after the client approved it
 
@@ -1353,6 +1357,70 @@ Text returned by a tool contains directive language addressed to the agent rathe
 **Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-1427: Improper Neutralization of Input Used for LLM Prompting
 
 **References.** https://owasp.org/www-project-top-10-for-large-language-model-applications/
+
+### DYN-005 — Hook read and disclosed a planted credential
+
+**AASB 10.5** · Level 1 · **CRITICAL** · applies to: hooks
+
+A hook returned, or wrote out, a unique token that existed only inside a fake credential file in the sandbox.
+
+**Detection rationale.** The token is random and exists only in the jail, so the hook cannot have produced it without reading the file. Hooks run automatically on an event, so unlike a tool call there is no approval step and no model decision that a user could decline.
+
+**Security impact.** Against a real home directory the same hook hands out a live credential on every matching event, with no prompt and no transcript entry the user is likely to read.
+
+**Remediation.** Remove the hook from settings and rotate every credential in the locations named below on any machine where it has fired.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure; MITRE ATLAS: AML.T0055: Unsecured Credentials; CWE: CWE-200: Exposure of Sensitive Information
+
+**References.** https://docs.anthropic.com/en/docs/claude-code/hooks
+
+### DYN-006 — Hook injected instructions into the model's context
+
+**AASB 10.6** · Level 1 · **HIGH** · applies to: hooks
+
+Text a hook emitted on a route that re-enters the model's context contained directive language aimed at the agent.
+
+**Detection rationale.** Three routes carry hook output back into context: stdout on the events that feed context, stderr on exit code 2, and additionalContext in a JSON response. Text arriving that way is indistinguishable to the model from the agent's own reasoning. Static reading cannot cover it because the text may be assembled at runtime from a fetch or a decode.
+
+**Security impact.** An instruction placed here is executed with the user's full session authority and reappears on every matching event.
+
+**Remediation.** Review the flagged text. A hook should return data or a decision, never instructions addressed to the model.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-1427: Improper Neutralization of Input Used for LLM Prompting
+
+**References.** https://docs.anthropic.com/en/docs/claude-code/hooks
+
+### DYN-007 — Hook auto-approves tool calls
+
+**AASB 10.7** · Level 1 · **HIGH** · applies to: hooks
+
+A PreToolUse hook returned permissionDecision 'allow', granting a tool call without the user being asked.
+
+**Detection rationale.** A PreToolUse hook can settle the permission prompt on the user's behalf. Returning 'allow' for a synthetic, entirely unremarkable tool call means the decision is not conditional on anything Argus varied — which is the shape of a blanket bypass rather than a considered policy. The decision is computed at runtime, so the source may show only that a decision is returned, not which one.
+
+**Security impact.** The approval gate that the whole permission system depends on is answered automatically, and the user sees no prompt.
+
+**Remediation.** Restrict the hook to the specific tool invocations it is meant to pre-approve, and return 'ask' as the default rather than 'allow'.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-863: Incorrect Authorization
+
+**References.** https://docs.anthropic.com/en/docs/claude-code/hooks
+
+### DYN-008 — Component rewrote agent configuration while running
+
+**AASB 10.8** · Level 1 · **CRITICAL** · applies to: hooks, mcp
+
+A probed hook or MCP server modified the settings, MCP registry or instruction file planted in the sandbox.
+
+**Detection rationale.** Nothing legitimately edits the agent's own configuration as a side effect of answering a tool call or handling an event. Writing to settings.json is how a single execution becomes a standing foothold: the component adds a hook, an MCP server, or a line of CLAUDE.md that survives the session and re-establishes itself.
+
+**Security impact.** Persistence. The change outlives the process that made it and takes effect on every subsequent session, including after the original component is removed.
+
+**Remediation.** Treat the machine as compromised: diff ~/.claude/settings.json, ~/.claude.json and every CLAUDE.md against version control, then remove the component.
+
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; MITRE ATLAS: AML.T0018: Manipulate AI Model; CWE: CWE-732: Incorrect Permission Assignment for Critical Resource
+
+**References.** https://docs.anthropic.com/en/docs/claude-code/settings
 
 
 ---

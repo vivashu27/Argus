@@ -84,6 +84,7 @@ class ScanOptions:
     #: the engine never pulls in the subprocess machinery of :mod:`argus.dynamic`;
     #: an ordinary scan must not carry the code that executes servers.
     probes: list[Any] = field(default_factory=list)
+    hook_probes: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -136,7 +137,7 @@ def run_scan(options: ScanOptions) -> ScanReport:
     # denominator that scores are compared against. An operator who names the
     # category explicitly still gets them, and gets told why they are empty.
     categories = options.categories
-    if categories is None and not options.probes:
+    if categories is None and not (options.probes or options.hook_probes):
         categories = {c for c in Category if c is not Category.DYNAMIC}
 
     checks = (
@@ -154,7 +155,11 @@ def run_scan(options: ScanOptions) -> ScanReport:
         assets=assets,
         project_root=options.project_root,
         home=home,
-        options={"verbose": options.verbose, "dynamic_probes": list(options.probes)},
+        options={
+            "verbose": options.verbose,
+            "dynamic_probes": list(options.probes),
+            "dynamic_hook_probes": list(options.hook_probes),
+        },
     )
 
     findings: list[Finding] = []

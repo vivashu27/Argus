@@ -8,13 +8,15 @@ cannot reach the process-spawning path even by accident.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .core.models import Asset, Target
 from .discovery import discover_all
+from .dynamic import hook_runner
 from .dynamic import probe as probe_mod
 from .dynamic import sandbox as sandbox_mod
+from .dynamic.hook_runner import HookProbe
 from .dynamic.probe import ProbeResult
 
 #: Launchers that need something Argus cannot provide inside the jail: a running
@@ -100,63 +102,112 @@ def candidates(assets: list[Asset]) -> list[Candidate]:
     return out
 
 
+@dataclass
+class ProbeRun:
+    """Everything one ``argus dynamo`` invocation observed."""
+
+    sandbox: sandbox_mod.Sandbox
+    servers: list[ProbeResult] = field(default_factory=list)
+    hooks: list[HookProbe] = field(default_factory=list)
+    candidates: list[Candidate] = field(default_factory=list)
+
+    @property
+    def attempted(self) -> int:
+        return len(self.servers) + len(self.hooks)
+
+    @property
+    def executed(self) -> int:
+        return sum(1 for p in self.servers if p.started) + sum(
+            1 for h in self.hooks if h.ran
+        )
+
+
 def run_probes(
     project_root: Path,
     *,
     home: Path | None = None,
     user_scope: bool = True,
     only: set[str] | None = None,
+    targets: set[Target] | None = None,
     network: bool = False,
     timeout: float = 20.0,
     call_tools: bool = True,
     include_mutating: bool = False,
-) -> tuple[list[ProbeResult], list[Candidate], sandbox_mod.Sandbox]:
-    """Discover MCP servers and probe each one under its own sandbox.
+) -> ProbeRun:
+    """Discover components and exercise each one under its own sandbox.
 
-    Each server gets a fresh jail with fresh canaries, so a token recovered from one
-    server cannot be attributed to another, and a server that fouls its scratch home
+    Every component gets a fresh jail with fresh canaries, so a token recovered from
+    one cannot be attributed to another, and a component that fouls its scratch home
     cannot affect the next.
     """
-    assets, _ = discover_all(project_root, {Target.MCP}, home=home, user_scope=user_scope)
-    found = candidates(assets)
-    if only:
-        found = [c for c in found if any(needle in c.server_id for needle in only)]
+    wanted = targets or {Target.MCP, Target.HOOKS}
+    assets, _ = discover_all(project_root, wanted, home=home, user_scope=user_scope)
 
     root = sandbox_mod.scratch_root()
-    results: list[ProbeResult] = []
+    # Built up front: the operator needs the isolation summary even when nothing
+    # turns out to be probeable, and detect_sandbox() must fail before anything runs.
+    run = ProbeRun(sandbox=sandbox_mod.build(root / "_reference", network=network))
     reference: sandbox_mod.Sandbox | None = None
 
-    for candidate in found:
-        if candidate.skip_reason:
-            results.append(
-                ProbeResult(
-                    server_id=candidate.server_id,
-                    command="",
-                    reason=candidate.skip_reason,
+    def matches(identifier: str) -> bool:
+        return not only or any(needle in identifier for needle in only)
+
+    if Target.MCP in wanted:
+        run.candidates = [c for c in candidates(assets) if matches(c.server_id)]
+        for candidate in run.candidates:
+            if candidate.skip_reason:
+                run.servers.append(
+                    ProbeResult(
+                        server_id=candidate.server_id,
+                        command="",
+                        reason=candidate.skip_reason,
+                    )
+                )
+                continue
+            jail = sandbox_mod.build(
+                probe_mod.scratch_for(root, candidate.server_id),
+                source=candidate.source,
+                network=network,
+            )
+            reference = reference or jail
+            run.servers.append(
+                probe_mod.probe_server(
+                    candidate.server_id,
+                    candidate.argv,
+                    jail,
+                    workdir=str(candidate.source) if candidate.source else None,
+                    timeout=timeout,
+                    call_tools=call_tools,
+                    include_mutating=include_mutating,
                 )
             )
-            continue
 
-        jail = sandbox_mod.build(
-            probe_mod.scratch_for(root, candidate.server_id),
-            source=candidate.source,
-            network=network,
-        )
-        reference = reference or jail
-        results.append(
-            probe_mod.probe_server(
-                candidate.server_id,
-                candidate.argv,
-                jail,
-                workdir=str(candidate.source) if candidate.source else None,
-                timeout=timeout,
-                call_tools=call_tools,
-                include_mutating=include_mutating,
+    if Target.HOOKS in wanted:
+        for asset in assets:
+            if asset.target is not Target.HOOKS or not matches(asset.asset_id):
+                continue
+            data = asset.data
+            # A hook may invoke a script that lives outside the jail's default mounts.
+            script = data.get("script_path")
+            source = Path(script).parent.resolve() if script and Path(script).exists() else None
+            jail = sandbox_mod.build(
+                probe_mod.scratch_for(root, asset.asset_id),
+                source=source,
+                network=network,
             )
-        )
+            reference = reference or jail
+            declared = data.get("timeout")
+            run.hooks.append(
+                hook_runner.run_hook(
+                    asset.asset_id,
+                    str(data.get("event") or ""),
+                    str(data.get("matcher") or ""),
+                    str(data.get("command") or ""),
+                    jail,
+                    timeout=float(declared) if isinstance(declared, (int, float)) else timeout,
+                )
+            )
 
-    if reference is None:
-        # Nothing was probed, but the operator still needs the isolation summary to
-        # know what would have applied.
-        reference = sandbox_mod.build(root / "_reference", network=network)
-    return results, found, reference
+    if reference is not None:
+        run.sandbox = reference
+    return run

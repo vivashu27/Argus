@@ -20,6 +20,7 @@ believed.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 import shutil
@@ -77,6 +78,17 @@ class Canary:
     description: str
     token: str
     body: str
+
+
+#: Agent configuration planted in the jail so that tampering with it is visible.
+#: Persistence is the step that turns a single execution into a standing foothold —
+#: a hook that appends another hook to settings.json survives everything except
+#: someone reading the file afterwards.
+_WATCHED_CONFIG: tuple[tuple[str, str], ...] = (
+    (".claude/settings.json", '{\n  "permissions": {"deny": ["Read(./.env)"]},\n  "hooks": {}\n}\n'),
+    (".claude.json", '{\n  "mcpServers": {}\n}\n'),
+    (".claude/CLAUDE.md", "# Project notes\n\nNothing here.\n"),
+)
 
 
 def _make_canaries() -> list[Canary]:
@@ -161,17 +173,55 @@ class Sandbox:
         return wrapped + argv
 
     def seed(self) -> None:
-        """Create the scratch home and plant the canaries."""
+        """Create the scratch home, plant the canaries, and lay down agent config."""
         self.home.mkdir(parents=True, exist_ok=True)
         for canary in self.canaries:
             target = self.home / canary.relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(canary.body, encoding="utf-8")
             target.chmod(0o600)
+        for relative, body in _WATCHED_CONFIG:
+            target = self.home / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
 
     def find_canaries(self, text: str) -> list[Canary]:
-        """Canaries whose token appears in text the server produced."""
+        """Canaries whose token appears in text the component produced."""
         return [canary for canary in self.canaries if canary.token in text]
+
+    def redact_canaries(self, text: str) -> str:
+        """Replace canary tokens with a marker, once a hit has been recorded.
+
+        Detection happens at capture time, so nothing is lost by redacting before
+        the text is stored. What is gained is that a report never carries the
+        credential it is reporting on — the canaries here are fake, but the same
+        code path holds tool output that may contain a real one, and a security
+        report that leaks a live secret into a file or a CI log has made the
+        problem worse.
+        """
+        for canary in self.canaries:
+            text = text.replace(canary.token, f"[REDACTED:{canary.relative}]")
+        return text
+
+    def config_digest(self) -> dict[str, str]:
+        """Hashes of the planted agent configuration, for before/after comparison."""
+        digests: dict[str, str] = {}
+        for relative, _ in _WATCHED_CONFIG:
+            target = self.home / relative
+            try:
+                digests[relative] = hashlib.sha256(target.read_bytes()).hexdigest()
+            except OSError:
+                digests[relative] = "(absent)"
+        return digests
+
+    def config_changes(self, before: dict[str, str]) -> list[str]:
+        """Planted configuration files that differ from how they were planted."""
+        after = self.config_digest()
+        return sorted(
+            relative
+            for relative, digest in after.items()
+            if before.get(relative) != digest
+        )
 
 
 def _bwrap_works() -> bool:

@@ -68,6 +68,9 @@ class ProbeResult:
     snapshots: list[ToolSnapshot] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     canary_hits: list[tuple[Canary, str]] = field(default_factory=list)
+    #: Planted agent-configuration files the server rewrote while running. A server
+    #: has no more business editing settings.json than a hook does.
+    config_changes: list[str] = field(default_factory=list)
     stderr: list[str] = field(default_factory=list)
     exit_code: int | None = None
     sandbox_backend: str = ""
@@ -162,6 +165,7 @@ def probe_server(
     )
     wrapped = sandbox.wrap(argv, workdir=workdir)
     client = StdioMcpClient(wrapped, timeout=timeout)
+    config_before = sandbox.config_digest()
 
     try:
         client.start()
@@ -200,6 +204,8 @@ def probe_server(
                 result.calls.append(call)
                 for canary in sandbox.find_canaries(call.output):
                     result.canary_hits.append((canary, tool.name))
+                # Recorded; now strip it so the report cannot carry the secret.
+                call.output = sandbox.redact_canaries(call.output)
 
         # The second listing is the point of the exercise: a description that
         # changed between here and the handshake was changed by the server, after
@@ -217,6 +223,8 @@ def probe_server(
         for line in result.stderr:
             for canary in sandbox.find_canaries(line):
                 result.canary_hits.append((canary, "stderr"))
+        result.stderr = [sandbox.redact_canaries(line) for line in result.stderr]
+        result.config_changes = sandbox.config_changes(config_before)
 
     return result
 

@@ -29,8 +29,8 @@ It is intended to be safe to point at a deliberately malicious configuration. Se
 [`docs/threat-model.md`](docs/threat-model.md).
 
 > **`argus dynamo` is the one exception, and it is opt-in.** Dynamic analysis works
-> by running the MCP servers it audits, under a sandbox, because the attacks it
-> finds do not exist until the server is running. It refuses to start without
+> by running the MCP servers and hooks it audits, under a sandbox, because the
+> attacks it finds do not exist until the component is running. It refuses to start without
 > `--i-understand-this-executes-code`. See [Dynamic analysis](#dynamic-analysis-argus-dynamo).
 
 ---
@@ -352,7 +352,7 @@ fingerprint, so moving code does not churn the file.
 
 ## The benchmark
 
-**AASB v1.0** — 71 static checks in 8 sections, plus 4 dynamic checks in section 10.
+**AASB v1.0** — 71 static checks in 8 sections, plus 8 dynamic checks in section 10.
 Check IDs are canonical; CIS-style numbers are derived (`CLAUDE-001` → AASB `1.1`).
 
 | § | Section | Prefix | Checks | Run by |
@@ -365,7 +365,7 @@ Check IDs are canonical; CIS-style numbers are derived (`CLAUDE-001` → AASB `1
 | 6 | Instruction Files | `INSTR-` | 5 | `scan` |
 | 7 | Secrets | `SECRET-` | 5 | `scan` |
 | 8 | Filesystem | `FS-` | 7 | `scan` |
-| 10 | Dynamic Analysis | `DYN-` | 4 | `dynamo` |
+| 10 | Dynamic Analysis | `DYN-` | 8 | `dynamo` |
 
 Section 10 is deliberately excluded from `argus scan`, so a static score stays
 comparable across releases and is never mixed with observations from a probe.
@@ -414,20 +414,46 @@ them answers `tools/list` differently the second time. `MCP-019` can flag code t
 argus dynamo --i-understand-this-executes-code
 ```
 
-| Check | Finds | Why static analysis cannot |
-|---|---|---|
-| `DYN-001` | Tool description or schema changed after handshake | The source is the same in both states; only the two answers differ |
-| `DYN-002` | Tools appeared or vanished mid-session | The inventory is produced at runtime |
-| `DYN-003` | A planted credential was read and echoed back | Requires observing a real read |
-| `DYN-004` | Injected instructions in tool *output* | The text does not exist until the tool is called |
+`dynamo` probes the two component types that are **processes**: MCP servers and
+hooks. A hook is arguably the better target — an MCP tool runs only if the model
+decides to call it, whereas a hook fires automatically on an event, with no approval
+step in between.
+
+| Check | Applies to | Finds | Why static analysis cannot |
+|---|---|---|---|
+| `DYN-001` | MCP | Tool description or schema changed after handshake | The source is the same in both states; only the two answers differ |
+| `DYN-002` | MCP | Tools appeared or vanished mid-session | The inventory is produced at runtime |
+| `DYN-003` | MCP | A planted credential was read and echoed back | Requires observing a real read |
+| `DYN-004` | MCP | Injected instructions in tool *output* | The text does not exist until the tool is called |
+| `DYN-005` | Hooks | A hook read and disclosed a planted credential | Requires observing a real read |
+| `DYN-006` | Hooks | A hook injected instructions into the model's context | The payload may be assembled at runtime |
+| `DYN-007` | Hooks | A `PreToolUse` hook auto-approves tool calls | The decision is computed, not declared |
+| `DYN-008` | Both | Agent configuration rewritten for persistence | Requires observing the write |
+
+`DYN-006` covers all three routes by which hook output re-enters context: stdout on
+`UserPromptSubmit`/`SessionStart`, stderr on exit code 2, and `additionalContext` in
+a JSON response.
+
+```bash
+argus dynamo --target hooks --i-understand-this-executes-code
+```
 
 **Containment.** Each server runs in its own unprivileged
 [bubblewrap](https://github.com/containers/bubblewrap) namespace: host filesystem
 read-only, your real home not mounted, network disabled, a fresh PID namespace that
 dies with the parent. Fake credentials are planted at `~/.ssh/id_rsa`,
 `~/.aws/credentials`, `~/.env` and `~/.claude/.credentials.json`; each carries a
-random token, so a token coming back in tool output is proof of a read, not an
-inference.
+random token, so a token coming back in output is proof of a read, not an
+inference. Tokens are redacted from stored output once a hit is recorded, so a
+report never carries the credential it is reporting on. A copy of
+`settings.json`, `.claude.json` and `CLAUDE.md` is planted too and hashed before
+and after, which is how `DYN-008` sees persistence.
+
+**Skills and instruction files are not probed, and cannot be.** They are context,
+not code — nothing executes them but a model. A malicious skill's payload lives in
+its markdown prose, so running its bundled scripts standalone would not trigger it.
+`argus dynamo --target skills` refuses with that explanation rather than pretending
+to cover them.
 
 **Limits, stated plainly.** A kernel-level namespace escape is not defended against.
 `--allow-network` means exfiltration *succeeds* rather than merely being attempted —
