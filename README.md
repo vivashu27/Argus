@@ -27,12 +27,6 @@ Argus treats every discovered file as untrusted input. It **never**:
 
 It is intended to be safe to point at a deliberately malicious configuration. See
 [`docs/threat-model.md`](docs/threat-model.md).
-
-> **`argus dynamo` is the one exception, and it is opt-in.** Dynamic analysis works
-> by running the MCP servers and hooks it audits, under a sandbox, because the
-> attacks it finds do not exist until the component is running. It refuses to start without
-> `--i-understand-this-executes-code`. See [Dynamic analysis](#dynamic-analysis-argus-dynamo).
-
 ---
 
 ## Install
