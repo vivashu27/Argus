@@ -80,11 +80,9 @@ class ScanOptions:
     rules_only: bool = False
     triage_path: Path | None = None
     verbose: bool = False
-    #: Runtime observations from ``argus dynamo``. Typed loosely so that importing
-    #: the engine never pulls in the subprocess machinery of :mod:`argus.dynamic`;
-    #: an ordinary scan must not carry the code that executes servers.
-    probes: list[Any] = field(default_factory=list)
-    hook_probes: list[Any] = field(default_factory=list)
+    #: Results from ``argus review``. Typed loosely so importing the engine never
+    #: pulls in the HTTP client that talks to a provider.
+    reviews: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -132,12 +130,11 @@ def run_scan(options: ScanOptions) -> ScanReport:
 
     # 4-5. Static analysis and security checks. Discovery still runs in full under
     # rules_only: rules match against assets, so they need the same inventory.
-    # Dynamic checks report on a probe. Without one they would add a row per check
-    # to every ordinary scan saying nothing was observed, and shift the benchmark
-    # denominator that scores are compared against. An operator who names the
-    # category explicitly still gets them, and gets told why they are empty.
+    # Review checks report a model's judgement about assets. Without a review they
+    # would add a row per check to every ordinary scan saying nothing was looked at.
+    # Naming the category explicitly still returns them, with that reason attached.
     categories = options.categories
-    if categories is None and not (options.probes or options.hook_probes):
+    if categories is None and not options.reviews:
         categories = {c for c in Category if c is not Category.DYNAMIC}
 
     checks = (
@@ -155,11 +152,7 @@ def run_scan(options: ScanOptions) -> ScanReport:
         assets=assets,
         project_root=options.project_root,
         home=home,
-        options={
-            "verbose": options.verbose,
-            "dynamic_probes": list(options.probes),
-            "dynamic_hook_probes": list(options.hook_probes),
-        },
+        options={"verbose": options.verbose, "reviews": list(options.reviews)},
     )
 
     findings: list[Finding] = []

@@ -185,6 +185,17 @@ def render(report: ScanReport, console: Console | None = None, verbose: bool = F
 
     if summary.errors:
         out.print(Text(f"  {summary.errors} check(s) errored — coverage is incomplete.", "bold red"))
+    if summary.advisory:
+        # Without this line the table reads as a contradiction: several HIGH
+        # failures next to grade A. Saying why they did not count is the difference
+        # between a reader trusting the score and doubting the whole report.
+        out.print(
+            Text(
+                f"  {summary.advisory} finding(s) are ADVISORY — a model's judgement, "
+                "reported but not scored and not gating.",
+                "cyan",
+            )
+        )
     if summary.accepted_risk:
         out.print(Text(f"  {summary.accepted_risk} finding(s) accepted as risk.", "yellow"))
     if summary.suppressed:

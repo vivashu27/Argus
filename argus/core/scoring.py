@@ -79,6 +79,7 @@ class Summary:
     errors: int = 0
     accepted_risk: int = 0
     suppressed: int = 0
+    advisory: int = 0
     critical: int = 0
     high: int = 0
     medium: int = 0
@@ -108,6 +109,7 @@ class Summary:
             "errors": self.errors,
             "accepted_risk": self.accepted_risk,
             "suppressed": self.suppressed,
+            "advisory": self.advisory,
             "critical": self.critical,
             "high": self.high,
             "medium": self.medium,
@@ -158,6 +160,13 @@ def score_findings(
             attr = severity_counters[finding.severity]
             setattr(summary, attr, getattr(summary, attr) + 1)
 
+        if finding.advisory:
+            # A model's judgement. Counted and reported in full, but never scored:
+            # the same environment can be judged differently on two runs, and a
+            # score that moves without the environment moving is not a measurement.
+            if finding.status in (Status.FAIL, Status.WARN):
+                summary.advisory += 1
+            continue
         if finding.suppressed:
             # Judged wrong by a human: it cannot deduct, but it is still counted so
             # the report shows how much of the result rests on suppression.

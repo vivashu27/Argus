@@ -219,6 +219,12 @@ class CheckMeta:
     remediation: str = ""
     references: tuple[str, ...] = ()
     compliance: tuple[tuple[str, str], ...] = ()
+    #: Reported but never scored and never gating. Set for checks whose verdict is a
+    #: model's judgement rather than a deterministic rule: the same environment can
+    #: be judged differently on two runs, and a score that moves without the
+    #: environment moving is not a measurement. Advisory findings are shown in full
+    #: — the point is to surface what a rule cannot see, not to hide it.
+    advisory: bool = False
 
     @property
     def aasb(self) -> str:
@@ -273,12 +279,24 @@ class Finding:
         return self.severity_override or self.meta.severity
 
     @property
+    def advisory(self) -> bool:
+        """Whether this finding is a model's judgement rather than a rule's verdict."""
+        return self.meta.advisory
+
+    @property
     def is_open(self) -> bool:
         """True when this finding gates the exit code (spec 3.5): FAIL, not accepted."""
-        return self.status is Status.FAIL and not self.accepted_risk and not self.suppressed
+        return (
+            self.status is Status.FAIL
+            and not self.accepted_risk
+            and not self.suppressed
+            and not self.meta.advisory
+        )
 
     @property
     def display_status(self) -> str:
+        if self.meta.advisory and self.status in (Status.FAIL, Status.WARN):
+            return f"{self.status.value} — ADVISORY"
         if self.suppressed:
             return f"{self.status.value} — FALSE POSITIVE"
         if self.accepted_risk and self.status is Status.FAIL:
@@ -297,6 +315,7 @@ class Finding:
             "status": self.status.value,
             "display_status": self.display_status,
             "confidence": self.confidence.value,
+            "advisory": self.meta.advisory,
             "aasb_level": self.meta.aasb_level,
             "asset": self.asset,
             "detail": self.detail,

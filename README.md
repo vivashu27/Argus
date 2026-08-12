@@ -17,7 +17,7 @@ agent layer rather than cloud accounts or hosts.
 
 ## Read-only by design
 
-`argus scan` treats every discovered file as untrusted input. It **never**:
+Argus treats every discovered file as untrusted input. It **never**:
 
 - modifies configuration, Skills, Plugins, hooks, or user files
 - installs anything
@@ -352,7 +352,7 @@ fingerprint, so moving code does not churn the file.
 
 ## The benchmark
 
-**AASB v1.0** — 71 static checks in 8 sections, plus 8 dynamic checks in section 10.
+**AASB v1.0** — 71 deterministic checks in 8 sections, plus 5 advisory checks in section 10.
 Check IDs are canonical; CIS-style numbers are derived (`CLAUDE-001` → AASB `1.1`).
 
 | § | Section | Prefix | Checks | Run by |
@@ -365,10 +365,10 @@ Check IDs are canonical; CIS-style numbers are derived (`CLAUDE-001` → AASB `1
 | 6 | Instruction Files | `INSTR-` | 5 | `scan` |
 | 7 | Secrets | `SECRET-` | 5 | `scan` |
 | 8 | Filesystem | `FS-` | 7 | `scan` |
-| 10 | Dynamic Analysis | `DYN-` | 8 | `dynamo` |
+| 10 | LLM Review *(advisory)* | `DYN-` | 5 | `review` |
 
-Section 10 is deliberately excluded from `argus scan`, so a static score stays
-comparable across releases and is never mixed with observations from a probe.
+Section 10 is excluded from `argus scan` and never scored, so a score stays
+reproducible and is never mixed with a model's judgement.
 
 **Level 1** — basic hygiene: concrete misconfigurations, low false-positive rate,
 remediation that does not materially reduce usability.
@@ -403,68 +403,57 @@ reason, never `PASS`. See [`docs/benchmark.md`](docs/benchmark.md#mcp-server-cod
 
 ---
 
-## Dynamic analysis (`argus dynamo`)
+## LLM review (`argus review`)
 
-Some attacks have no static signature. A rug-pull server's source is identical to a
-server that composes its descriptions legitimately — the difference is that one of
-them answers `tools/list` differently the second time. `MCP-019` can flag code that
-*looks* capable of mutating a description; only running the server settles it.
-
-```bash
-argus dynamo --i-understand-this-executes-code
-```
-
-`dynamo` probes the two component types that are **processes**: MCP servers and
-hooks. A hook is arguably the better target — an MCP tool runs only if the model
-decides to call it, whereas a hook fires automatically on an event, with no approval
-step in between.
-
-| Check | Applies to | Finds | Why static analysis cannot |
-|---|---|---|---|
-| `DYN-001` | MCP | Tool description or schema changed after handshake | The source is the same in both states; only the two answers differ |
-| `DYN-002` | MCP | Tools appeared or vanished mid-session | The inventory is produced at runtime |
-| `DYN-003` | MCP | A planted credential was read and echoed back | Requires observing a real read |
-| `DYN-004` | MCP | Injected instructions in tool *output* | The text does not exist until the tool is called |
-| `DYN-005` | Hooks | A hook read and disclosed a planted credential | Requires observing a real read |
-| `DYN-006` | Hooks | A hook injected instructions into the model's context | The payload may be assembled at runtime |
-| `DYN-007` | Hooks | A `PreToolUse` hook auto-approves tool calls | The decision is computed, not declared |
-| `DYN-008` | Both | Agent configuration rewritten for persistence | Requires observing the write |
-
-`DYN-006` covers all three routes by which hook output re-enters context: stdout on
-`UserPromptSubmit`/`SessionStart`, stderr on exit code 2, and `additionalContext` in
-a JSON response.
+Some risks are properties of what text *means*, and no regex reads meaning. Whether
+a skill quietly steers the agent toward one vendor, whether a hook's description
+matches what it does, whether an instruction is placed where a reviewer would not
+look — these are review questions, not pattern questions. They are also the two
+largest gaps in the deterministic benchmark: behaviour manipulation and context
+leakage, measured at 76% and 19% prevalence in MaliciousAgentSkillsBench, with no
+static coverage at all.
 
 ```bash
-argus dynamo --target hooks --i-understand-this-executes-code
+argus review --dry-run          # what would be sent, and roughly what it costs
+argus review                    # review MCP servers, Skills, hooks, instructions, plugins
+argus review --target skills --limit 5
 ```
 
-**Containment.** Each server runs in its own unprivileged
-[bubblewrap](https://github.com/containers/bubblewrap) namespace: host filesystem
-read-only, your real home not mounted, network disabled, a fresh PID namespace that
-dies with the parent. Fake credentials are planted at `~/.ssh/id_rsa`,
-`~/.aws/credentials`, `~/.env` and `~/.claude/.credentials.json`; each carries a
-random token, so a token coming back in output is proof of a read, not an
-inference. Tokens are redacted from stored output once a hit is recorded, so a
-report never carries the credential it is reporting on. A copy of
-`settings.json`, `.claude.json` and `CLAUDE.md` is planted too and hashed before
-and after, which is how `DYN-008` sees persistence.
+| Check | Asks |
+|---|---|
+| `DYN-001` | Does this steer the agent toward outcomes serving someone other than the user? |
+| `DYN-002` | Does it route conversation or file contents somewhere unexpected? |
+| `DYN-003` | Does the stated purpose understate what it can actually do? |
+| `DYN-004` | Does it instruct the agent somewhere a reviewer would not look? |
+| `DYN-005` | Does it use more capability than its stated task needs? |
 
-**Skills and instruction files are not probed, and cannot be.** They are context,
-not code — nothing executes them but a model. A malicious skill's payload lives in
-its markdown prose, so running its bundled scripts standalone would not trigger it.
-`argus dynamo --target skills` refuses with that explanation rather than pretending
-to cover them.
+Each criterion states what does **not** count, and the report quotes the rubric
+verbatim — what the model was asked is exactly what the finding says was checked.
 
-**Limits, stated plainly.** A kernel-level namespace escape is not defended against.
-`--allow-network` means exfiltration *succeeds* rather than merely being attempted —
-it exists for reproducing a finding, not for routine use. Servers launched by
-`docker`, `npx` or `uvx` are skipped with a reason, because the sandbox will not nest
-a container or fetch a package. And a dynamic check that finds nothing has watched
-one execution with synthesised arguments, which is far weaker than a static check
-that has read the whole file — so an unprobed server reports `MANUAL`, never `PASS`.
+### Advisory, by construction
 
-Requires `bubblewrap` (`apt install bubblewrap`). Without a working sandbox, dynamo
-refuses to run rather than falling back to the host.
+Review findings are reported in full but **never scored and never gate the exit
+code**. The same environment can be judged differently on two runs, and a benchmark
+score that moves without the environment moving is not a measurement. Keeping these
+outside the score is what allows them to be speculative enough to be useful.
+
+### Two safeguards
+
+**Every finding must quote the component verbatim, and the quote is verified.** A
+citation that does not appear in the text was invented, and the finding is dropped
+before you ever see it — `--verbose` lists what was discarded and why. This removes
+the most common failure mode of LLM-assisted scanning at almost no cost.
+
+**Credentials are redacted before anything is sent, and it fails closed.** Argus
+reads `~/.claude/.credentials.json`, `.env` files and MCP configs with keys inline.
+Payloads are scanned with the same detector that powers `SECRET-*`, offending lines
+are replaced, and any payload still tripping the scanner afterwards is **not sent at
+all**. A security tool must not exfiltrate the credentials it just found.
+
+Review sends component contents to a third-party API. `--dry-run` shows exactly what
+would leave the machine — and needs no API key, because that question should not
+depend on holding a key for the service it would go to. Nothing is sent without
+confirmation.
 
 ---
 

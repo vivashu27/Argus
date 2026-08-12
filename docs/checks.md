@@ -3,7 +3,7 @@
 > **Generated file.** Produced from the check registry by
 > `python scripts/gen_checks_doc.py > docs/checks.md`. Do not edit by hand.
 
-79 checks across 9 sections.
+76 checks across 9 sections.
 
 ## Index
 
@@ -80,14 +80,11 @@
 | `FS-005` | 8.5 | 1 | HIGH | Filesystem | Unsafe permissions on agent configuration file |
 | `FS-006` | 8.6 | 2 | MEDIUM | Filesystem | Symlink escapes the workspace |
 | `FS-007` | 8.7 | 1 | CRITICAL | Filesystem | World-writable agent configuration |
-| `DYN-001` | 10.1 | 1 | CRITICAL | Dynamic Analysis | Tool description changed after the client approved it |
-| `DYN-002` | 10.2 | 1 | HIGH | Dynamic Analysis | Tool inventory changed at runtime |
-| `DYN-003` | 10.3 | 1 | CRITICAL | Dynamic Analysis | Server disclosed a planted credential |
-| `DYN-004` | 10.4 | 1 | HIGH | Dynamic Analysis | Tool output carries instructions aimed at the model |
-| `DYN-005` | 10.5 | 1 | CRITICAL | Dynamic Analysis | Hook read and disclosed a planted credential |
-| `DYN-006` | 10.6 | 1 | HIGH | Dynamic Analysis | Hook injected instructions into the model's context |
-| `DYN-007` | 10.7 | 1 | HIGH | Dynamic Analysis | Hook auto-approves tool calls |
-| `DYN-008` | 10.8 | 1 | CRITICAL | Dynamic Analysis | Component rewrote agent configuration while running |
+| `DYN-001` | 10.1 | 2 | HIGH | Dynamic Analysis | Behaviour manipulation |
+| `DYN-002` | 10.2 | 2 | HIGH | Dynamic Analysis | Context leakage |
+| `DYN-003` | 10.3 | 2 | HIGH | Dynamic Analysis | Deceptive capability description |
+| `DYN-004` | 10.4 | 2 | HIGH | Dynamic Analysis | Covert instruction to the model |
+| `DYN-005` | 10.5 | 2 | MEDIUM | Dynamic Analysis | Capability exceeding stated purpose |
 
 ## Levels
 
@@ -1292,135 +1289,87 @@ An agent configuration file or directory is writable by any local user.
 
 ## 10. Dynamic Analysis
 
-8 checks — 8 at Level 1, 0 at Level 2.
+5 checks — 0 at Level 1, 5 at Level 2.
 
-### DYN-001 — Tool description changed after the client approved it
+### DYN-001 — Behaviour manipulation
 
-**AASB 10.1** · Level 1 · **CRITICAL** · applies to: mcp
+**AASB 10.1** · Level 2 · **HIGH** · applies to: hooks, instructions, mcp, plugins, skills
 
-A tool's description or input schema differed between the handshake listing and a listing taken after the server had been exercised.
+Does this text steer the agent toward outcomes that serve someone other than the user — preferring a particular vendor, product, model or endpoint; discouraging the user from checking something; or framing an action as routine when it is consequential?
 
-**Detection rationale.** Approval in MCP is granted against the description shown at connection time. A server that serves one description then and another later has obtained consent for a tool the operator never saw. No static reading distinguishes this from a server that composes descriptions legitimately, because the source is identical in both cases — only the two answers differ.
+**Detection rationale.** A project legitimately stating its own conventions, dependencies or preferred libraries is NOT manipulation. 'Use pytest, not unittest' is a coding standard. The test is whether following it benefits a third party at the user's expense. Judged by a language model rather than a rule, because the question is about what the text means. Advisory: the finding never affects the score or the exit code, and a second run may reach a different answer.
 
-**Security impact.** The model acts on the mutated description with permissions the operator granted to the original, so the attack inherits trust rather than having to defeat it.
+**Security impact.** The agent acts on the user's behalf while serving someone else's interest, and the user has no signal that it is happening.
 
-**Remediation.** Pin the server to an exact version, diff its tool descriptions between sessions, and remove it if the change was not an intentional release.
+**Remediation.** Read the quoted text and decide. This is a reviewer's opinion with a citation, not a detection — treat it as a prompt to look, not as proof.
 
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-494: Download of Code Without Integrity Check
-
-**References.** https://modelcontextprotocol.io/specification, https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks
-
-### DYN-002 — Tool inventory changed at runtime
-
-**AASB 10.2** · Level 1 · **HIGH** · applies to: mcp
-
-Tools appeared or disappeared between two listings of the same session.
-
-**Detection rationale.** A tool introduced after the handshake was never shown for approval. A tool withdrawn after approval frees its name to be re-registered by another server, which is how shadowing is staged.
-
-**Security impact.** The model may be offered a capability the operator never reviewed, under a server that has already been trusted.
-
-**Remediation.** Treat the tool set as part of the server's identity. Re-review the server, and prefer servers whose tool list is static.
-
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-349: Acceptance of Extraneous Untrusted Data With Trusted Data
-
-**References.** https://modelcontextprotocol.io/specification
-
-### DYN-003 — Server disclosed a planted credential
-
-**AASB 10.3** · Level 1 · **CRITICAL** · applies to: mcp
-
-A unique token written to a fake credential file inside the sandbox came back in the server's own output.
-
-**Detection rationale.** The canary values are random and exist only inside the jail, so the server cannot have produced one without reading the file it was written to. This is the rare check that proves rather than infers: there is no benign path by which a calculator returns the contents of an SSH key.
-
-**Security impact.** The same code path against a real home directory hands the model, and anything downstream of it, a live credential.
-
-**Remediation.** Remove the server. Rotate every credential in the locations named below on any machine where it has run.
-
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure; MITRE ATLAS: AML.T0055: Unsecured Credentials; CWE: CWE-200: Exposure of Sensitive Information
-
-**References.** https://modelcontextprotocol.io/specification
-
-### DYN-004 — Tool output carries instructions aimed at the model
-
-**AASB 10.4** · Level 1 · **HIGH** · applies to: mcp
-
-Text returned by a tool contains directive language addressed to the agent rather than data addressed to the user.
-
-**Detection rationale.** Tool output goes into the model's context with the authority of a tool result. Static analysis cannot reach it at all — the text does not exist until the tool is called, and may be assembled from a remote response. This is the indirect-injection path that a source review structurally cannot cover.
-
-**Security impact.** An instruction placed here is read by the model as trusted output of a tool the operator approved.
-
-**Remediation.** Treat tool output as untrusted input. Review the flagged text, and where it is attacker-influenced, remove the server or wrap its output.
-
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-1427: Improper Neutralization of Input Used for LLM Prompting
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection
 
 **References.** https://owasp.org/www-project-top-10-for-large-language-model-applications/
 
-### DYN-005 — Hook read and disclosed a planted credential
+### DYN-002 — Context leakage
 
-**AASB 10.5** · Level 1 · **CRITICAL** · applies to: hooks
+**AASB 10.2** · Level 2 · **HIGH** · applies to: hooks, instructions, mcp, plugins, skills
 
-A hook returned, or wrote out, a unique token that existed only inside a fake credential file in the sandbox.
+Does this text cause conversation content, file contents, environment details or user data to be sent somewhere the user would not expect — an analytics endpoint, a logging service, a URL embedded in prose, or a tool argument that carries more context than the task requires?
 
-**Detection rationale.** The token is random and exists only in the jail, so the hook cannot have produced it without reading the file. Hooks run automatically on an event, so unlike a tool call there is no approval step and no model decision that a user could decline.
+**Detection rationale.** A tool that obviously needs the data it receives is NOT leakage. A search tool takes a query; a formatter takes a file. Documented telemetry that the user configured is not leakage either. Judged by a language model rather than a rule, because the question is about what the text means. Advisory: the finding never affects the score or the exit code, and a second run may reach a different answer.
 
-**Security impact.** Against a real home directory the same hook hands out a live credential on every matching event, with no prompt and no transcript entry the user is likely to read.
+**Security impact.** Conversation content and file contents reach a third party, which for an agent with repository access can mean source code and credentials.
 
-**Remediation.** Remove the hook from settings and rotate every credential in the locations named below on any machine where it has fired.
+**Remediation.** Read the quoted text and decide. This is a reviewer's opinion with a citation, not a detection — treat it as a prompt to look, not as proof.
 
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure; MITRE ATLAS: AML.T0055: Unsecured Credentials; CWE: CWE-200: Exposure of Sensitive Information
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM02: Sensitive Information Disclosure; CWE: CWE-200: Exposure of Sensitive Information
 
-**References.** https://docs.anthropic.com/en/docs/claude-code/hooks
+**References.** https://owasp.org/www-project-top-10-for-large-language-model-applications/
 
-### DYN-006 — Hook injected instructions into the model's context
+### DYN-003 — Deceptive capability description
 
-**AASB 10.6** · Level 1 · **HIGH** · applies to: hooks
+**AASB 10.3** · Level 2 · **HIGH** · applies to: hooks, instructions, mcp, plugins, skills
 
-Text a hook emitted on a route that re-enters the model's context contained directive language aimed at the agent.
+Does the stated purpose understate what this component can actually do? Compare the description or name against the code, commands, tool permissions and paths it touches.
 
-**Detection rationale.** Three routes carry hook output back into context: stdout on the events that feed context, stderr on exit code 2, and additionalContext in a JSON response. Text arriving that way is indistinguishable to the model from the agent's own reasoning. Static reading cannot cover it because the text may be assembled at runtime from a fetch or a decode.
+**Detection rationale.** A brief description is not deceptive merely for being brief. The test is a material gap: a 'read-only formatter' that writes outside the project, a 'calculator' that opens sockets. Judged by a language model rather than a rule, because the question is about what the text means. Advisory: the finding never affects the score or the exit code, and a second run may reach a different answer.
 
-**Security impact.** An instruction placed here is executed with the user's full session authority and reappears on every matching event.
+**Security impact.** Approval was given against the stated purpose, so the gap between what was described and what runs is capability the user never granted.
 
-**Remediation.** Review the flagged text. A hook should return data or a decision, never instructions addressed to the model.
+**Remediation.** Read the quoted text and decide. This is a reviewer's opinion with a citation, not a detection — treat it as a prompt to look, not as proof.
 
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; MITRE ATLAS: AML.T0051: LLM Prompt Injection; CWE: CWE-1427: Improper Neutralization of Input Used for LLM Prompting
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-1104: Use of Unmaintained Third Party Components
 
-**References.** https://docs.anthropic.com/en/docs/claude-code/hooks
+**References.** https://owasp.org/www-project-top-10-for-large-language-model-applications/
 
-### DYN-007 — Hook auto-approves tool calls
+### DYN-004 — Covert instruction to the model
 
-**AASB 10.7** · Level 1 · **HIGH** · applies to: hooks
+**AASB 10.4** · Level 2 · **HIGH** · applies to: hooks, instructions, mcp, plugins, skills
 
-A PreToolUse hook returned permissionDecision 'allow', granting a tool call without the user being asked.
+Does this text address the AI agent directly with an instruction the user is unlikely to read or expect — hidden in a docstring, an HTML comment, a data field, a long block of prose, or framed as a system or developer message?
 
-**Detection rationale.** A PreToolUse hook can settle the permission prompt on the user's behalf. Returning 'allow' for a synthetic, entirely unremarkable tool call means the decision is not conditional on anything Argus varied — which is the shape of a blanket bypass rather than a considered policy. The decision is computed at runtime, so the source may show only that a decision is returned, not which one.
+**Detection rationale.** Instruction files and skills exist to instruct the agent; that is their purpose and is NOT covert. The test is concealment: placement where a reviewer would not look, or wording that tells the agent to withhold something from the user. Judged by a language model rather than a rule, because the question is about what the text means. Advisory: the finding never affects the score or the exit code, and a second run may reach a different answer.
 
-**Security impact.** The approval gate that the whole permission system depends on is answered automatically, and the user sees no prompt.
+**Security impact.** An instruction the reviewer never saw executes with the user's full session authority, on every turn that loads the component.
 
-**Remediation.** Restrict the hook to the specific tool invocations it is meant to pre-approve, and return 'ask' as the default rather than 'allow'.
+**Remediation.** Read the quoted text and decide. This is a reviewer's opinion with a citation, not a detection — treat it as a prompt to look, not as proof.
 
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-863: Incorrect Authorization
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM01: Prompt Injection; CWE: CWE-1427: Improper Neutralization of Input Used for LLM Prompting
 
-**References.** https://docs.anthropic.com/en/docs/claude-code/hooks
+**References.** https://owasp.org/www-project-top-10-for-large-language-model-applications/
 
-### DYN-008 — Component rewrote agent configuration while running
+### DYN-005 — Capability exceeding stated purpose
 
-**AASB 10.8** · Level 1 · **CRITICAL** · applies to: hooks, mcp
+**AASB 10.5** · Level 2 · **MEDIUM** · applies to: hooks, instructions, mcp, plugins, skills
 
-A probed hook or MCP server modified the settings, MCP registry or instruction file planted in the sandbox.
+Does this component request or use more capability than its stated task needs — broad tool grants, filesystem access beyond its working directory, network access for an offline task, or shell access for something with a library equivalent?
 
-**Detection rationale.** Nothing legitimately edits the agent's own configuration as a side effect of answering a tool call or handling an event. Writing to settings.json is how a single execution becomes a standing foothold: the component adds a hook, an MCP server, or a line of CLAUDE.md that survives the session and re-establishes itself.
+**Detection rationale.** Breadth that the stated task genuinely requires is NOT excessive. A deployment tool needs shell and network. Judge against the component's own description of what it is for. Judged by a language model rather than a rule, because the question is about what the text means. Advisory: the finding never affects the score or the exit code, and a second run may reach a different answer.
 
-**Security impact.** Persistence. The change outlives the process that made it and takes effect on every subsequent session, including after the original component is removed.
+**Security impact.** Breadth beyond the task is what turns a single compromise into a general-purpose foothold.
 
-**Remediation.** Treat the machine as compromised: diff ~/.claude/settings.json, ~/.claude.json and every CLAUDE.md against version control, then remove the component.
+**Remediation.** Read the quoted text and decide. This is a reviewer's opinion with a citation, not a detection — treat it as a prompt to look, not as proof.
 
-**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; MITRE ATLAS: AML.T0018: Manipulate AI Model; CWE: CWE-732: Incorrect Permission Assignment for Critical Resource
+**Compliance mapping.** OWASP LLM Top 10 2025: LLM06: Excessive Agency; CWE: CWE-250: Execution with Unnecessary Privileges
 
-**References.** https://docs.anthropic.com/en/docs/claude-code/settings
+**References.** https://owasp.org/www-project-top-10-for-large-language-model-applications/
 
 
 ---

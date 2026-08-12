@@ -421,109 +421,116 @@ def check(
 
 
 @app.command()
-def dynamo(
-    path: Path | None = typer.Option(None, "--path", "-p", help="Project root to search for components."),
-    target: list[str] | None = typer.Option(None, "--target", "-t", help="Limit to 'mcp' or 'hooks'. Default: both."),
-    server: list[str] | None = typer.Option(None, "--server", help="Probe only components whose id contains this. Repeatable."),
-    i_understand: bool = typer.Option(False, "--i-understand-this-executes-code", help="Required. Confirms you accept that dynamo runs the audited servers."),
-    allow_network: bool = typer.Option(False, "--allow-network", help="Give probed servers real network access. Exfiltration will succeed, not merely be attempted."),
-    include_mutating: bool = typer.Option(False, "--include-mutating", help="Also invoke tools whose name suggests they change state."),
-    no_call: bool = typer.Option(False, "--no-call", help="List tools but never invoke them. Weakens DYN-001 and disables DYN-004."),
-    timeout: float = typer.Option(20.0, "--timeout", help="Seconds to wait for any single server response."),
+def review(
+    path: Path | None = typer.Option(None, "--path", "-p", help="Project root to review."),
+    provider_name: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, openai, moonshot, deepseek."),
+    model: str | None = typer.Option(None, "--model", help="Override the provider's default model."),
+    target: list[str] | None = typer.Option(None, "--target", "-t", help="Limit to: mcp, skills, hooks, instructions, plugins."),
+    component: list[str] | None = typer.Option(None, "--component", help="Review only components whose id contains this. Repeatable."),
+    limit: int = typer.Option(0, "--limit", help="Review at most N components. 0 means no limit."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be sent and the estimated cost, then stop."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     fmt: list[str] | None = typer.Option(None, "--format", "-f", help=f"Output format, repeatable. One of: {', '.join(FORMATS)}."),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write reports to this directory."),
-    severity: str | None = typer.Option(None, "--severity", "-s", help="Report gate: show this severity and above."),
-    fail_on: str | None = typer.Option(None, "--fail-on", help="Exit-code gate: fail on this severity and above (default: high)."),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show all evidence and the full probe transcript."),
-    exit_zero: bool = typer.Option(False, "--exit-zero", help="Always exit 0 when the probe itself completes."),
-    no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Probe only servers declared under --path."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show evidence and every discarded reviewer answer."),
+    no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Review only components under --path."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
 ) -> None:
-    """Audit MCP servers and hooks by running them in a sandbox (AASB section 10).
+    """Have an LLM review components against the AASB rubric (section 10, DYN-*).
 
-    Unlike 'scan', this executes the components it audits. It finds what static
-    reading cannot: descriptions that mutate after approval, tools that appear
-    mid-session, credentials read and echoed back, instructions injected into tool
-    output or into the model's context by a hook, and configuration rewritten for
-    persistence. Everything runs under an unprivileged namespace with no network,
-    no access to your real home, and fake credentials planted as tripwires.
+    Covers what deterministic rules structurally cannot: whether a skill steers the
+    agent toward someone else's interest, whether a hook leaks context, whether a
+    description matches what the code does. Reviews MCP servers, Skills, hooks,
+    instruction files and plugins.
+
+    Findings are ADVISORY. They are reported in full but never scored and never gate
+    the exit code, because the same environment can be judged differently on two
+    runs and a score that moves on its own is not a measurement.
+
+    This sends component contents to a third-party API. Credentials are redacted
+    first, and anything still carrying one after redaction is not sent at all.
     """
     logger = log.configure(verbose=verbose)
     global console
     if no_color:
         console = Console(no_color=True, force_terminal=False)
 
-    from .dynamic.sandbox import SandboxUnavailable, describe_isolation
-    from .dynamo import run_probes
-
-    if not i_understand:
-        _fail(
-            "dynamo executes the MCP servers and hooks it audits. That is the point "
-            "of the module, and it is not safe to do casually.\n\n"
-            "  Re-run with --i-understand-this-executes-code once you have read what "
-            "it does:\n"
-            "    - each component is launched under an unprivileged bubblewrap namespace\n"
-            "    - the host filesystem is read-only and your real home is not mounted\n"
-            "    - the network is disabled unless you pass --allow-network\n"
-            "    - fake credentials are planted to detect reads\n\n"
-            "  A kernel-level namespace escape is not defended against. Do not point "
-            "this at a component you believe is actively malicious on a machine you "
-            "care about."
-        )
+    from .review.reviewer import consent_line
+    from .reviewer_cli import prepare
+    from .reviewer_cli import run as run_reviews
+    from .rules.providers import SPECS, LLMError, build_provider
 
     project_root = (path or Path.cwd()).expanduser()
     if not project_root.exists():
         _fail(f"path does not exist: {project_root}")
 
     targets = _parse_enum_list(target, Target.parse, "target")
-    if targets and targets - {Target.MCP, Target.HOOKS}:
-        unsupported = ", ".join(sorted(t.value for t in targets - {Target.MCP, Target.HOOKS}))
-        _fail(
-            f"dynamo cannot probe: {unsupported}. Only 'mcp' and 'hooks' are "
-            "processes that can be executed and observed. Skills and instruction "
-            "files are context rather than code — nothing runs them but a model — so "
-            "they stay with 'argus scan'."
+    payloads, refused = prepare(
+        project_root,
+        user_scope=not no_user_scope,
+        targets=targets,
+        only=set(component) if component else None,
+        limit=limit,
+    )
+    for asset_id, reason in refused:
+        err_console.print(Text(f"  skipped {asset_id}: {reason}", style="yellow"))
+    if not payloads:
+        _fail("no reviewable components found. Check --path and --target.")
+
+    # Dry run is answered before a provider is built, so "show me what would leave
+    # this machine" never depends on holding a key for the service it would go to.
+    if dry_run:
+        spec = SPECS.get(provider_name.strip().lower())
+        total = sum(p.approx_tokens for p in payloads)
+        redacted = sum(len(p.redactions) for p in payloads)
+        err_console.print(
+            Text(
+                f"Would send {len(payloads)} component(s), roughly {total:,} tokens, to "
+                f"{provider_name} ({model or (spec.default_model if spec else '?')}, "
+                f"{spec.jurisdiction if spec else 'unknown jurisdiction'}).",
+                style="bold",
+            )
         )
+        if redacted:
+            err_console.print(
+                Text(f"{redacted} line(s) containing credentials would be redacted first.",
+                     style="dim")
+            )
+        for payload in payloads:
+            err_console.print(
+                Text(f"  {payload.asset_id}  ~{payload.approx_tokens:,} tokens", style="dim")
+            )
+        err_console.print(Text("dry run — nothing was sent.", style="green"))
+        raise typer.Exit(EXIT_OK)
 
     try:
-        run = run_probes(
-            project_root,
-            user_scope=not no_user_scope,
-            only=set(server) if server else None,
-            targets=targets,
-            network=allow_network,
-            timeout=timeout,
-            call_tools=not no_call,
-            include_mutating=include_mutating,
-        )
-    except SandboxUnavailable as exc:
-        _fail(f"no usable sandbox: {exc}", EXIT_SCANNER_ERROR)
-    except Exception as exc:  # noqa: BLE001
-        _fail(f"probe failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
+        provider = build_provider(provider_name, model=model)
+    except LLMError as exc:
+        _fail(str(exc))
 
-    err_console.print(Text("sandbox", style="bold"))
-    for line in describe_isolation(run.sandbox):
-        err_console.print(Text(f"  {line}", style="dim"))
-    err_console.print(
-        Text(
-            f"  executed {run.executed} of {run.attempted} component(s): "
-            f"{len(run.servers)} MCP server(s), {len(run.hooks)} hook(s)\n",
-            style="dim",
-        )
-    )
-    if allow_network:
-        err_console.print(
-            Text("  WARNING: --allow-network is set. A malicious server can reach the "
-                 "internet from inside the sandbox.\n", style="bold yellow")
-        )
-    logger.debug("probe candidates: %s", [c.server_id for c in run.candidates])
+    err_console.print(Text(consent_line(provider, payloads), style="bold"))
+    if verbose:
+        for payload in payloads:
+            err_console.print(
+                Text(f"  {payload.asset_id}  ~{payload.approx_tokens:,} tokens", style="dim")
+            )
+    if not yes and not typer.confirm("Send these components for review?"):
+        _fail("cancelled — nothing was sent.", EXIT_OK)
+
+    reviews = run_reviews(payloads, provider)
+    for item in reviews:
+        if item.error:
+            err_console.print(Text(f"  {item.asset_id}: {item.error}", style="yellow"))
+        if verbose and item.discarded:
+            for note in item.discarded:
+                err_console.print(Text(f"  {item.asset_id}: discarded — {note}", style="dim"))
+    logger.debug("reviewed %d of %d", sum(1 for r in reviews if r.usable), len(payloads))
 
     options = ScanOptions(
         project_root=project_root,
         categories={Category.DYNAMIC},
         user_scope=not no_user_scope,
-        probes=run.servers,
-        hook_probes=run.hooks,
+        reviews=reviews,
         verbose=verbose,
     )
     try:
@@ -531,18 +538,9 @@ def dynamo(
     except Exception as exc:  # noqa: BLE001
         _fail(f"scoring failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
 
-    if severity:
-        report.result.findings = filter_for_display(
-            report.result.findings, Severity.parse(severity)
-        )
     _emit(report, fmt or ["terminal"], output, verbose)
-
-    if exit_zero:
-        raise typer.Exit(EXIT_OK)
-    gate = Severity.parse(fail_on) if fail_on else Severity.HIGH
-    raise typer.Exit(
-        EXIT_FINDINGS if gating_findings(report.result.findings, gate) else EXIT_OK
-    )
+    # Advisory findings never gate, so review always exits 0 when it completed.
+    raise typer.Exit(EXIT_OK)
 
 
 rule_app = typer.Typer(
