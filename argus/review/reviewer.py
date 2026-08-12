@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..rules.providers import LLMError, Provider
-from .payload import Payload
+from .payload import Payload, normalise
 from .rubric import BY_ID, SYSTEM_PROMPT, user_prompt
 
 #: A quote shorter than this is not evidence — "the", "use" and "run" appear in
@@ -118,12 +118,16 @@ def parse_response(text: str, payload: Payload) -> tuple[list[Verdict], list[str
             # The grounding check. A quote that is not in the payload was invented,
             # and a finding resting on invented evidence is worse than no finding —
             # it is unfalsifiable by the person reading the report.
-            if len(quote) < MIN_QUOTE_CHARS:
+            # Measured on the same string the match runs against. Measuring the
+            # raw quote let padding defeat the floor: "the      \n\n     tests" is
+            # 21 raw characters but collapses to the 9-character "the tests", which
+            # is exactly the kind of string the floor exists to reject.
+            if len(normalise(quote)) < MIN_QUOTE_CHARS:
                 discarded.append(f"{check_id}: quote too short to verify")
                 continue
             # Whitespace-insensitive: hard-wrapped prose is quoted back as one
             # flowing sentence, and rejecting that would drop real findings.
-            if payload.find(quote) < 0:
+            if not payload.find(quote):
                 discarded.append(f"{check_id}: quote does not appear in the component")
                 continue
             if not reason:

@@ -122,12 +122,17 @@ class ReviewCheck(Check):
                                 line=verdict.line,
                                 key=self.meta.check_id.lower(),
                                 snippet=verdict.quote[:400],
+                                # Not "verbatim": the snippet is the reviewer's
+                                # rendering, whitespace-normalised, so a reader
+                                # grepping the file for it may not find that exact
+                                # string on that line. Saying otherwise would be the
+                                # same kind of lie this module refuses elsewhere.
                                 reason=(
-                                    "Quoted verbatim from the component and located in "
-                                    f"the source — reviewed by {review.model}"
+                                    "Quoted by the reviewer and matched against the "
+                                    f"source at this line — reviewed by {review.model}"
                                     if verdict.line
-                                    else "Quoted verbatim from the component and verified "
-                                    f"present — reviewed by {review.model}"
+                                    else "Quoted by the reviewer and confirmed present "
+                                    f"in the component — reviewed by {review.model}"
                                 ),
                             )
                         ],

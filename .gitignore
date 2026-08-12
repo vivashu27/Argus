@@ -45,5 +45,8 @@ argus.yaml
 project_outline.txt
 claude_session
 
-# Local rule authoring — personal templates, not part of the project
-rules/
+# Local rule authoring — personal templates, not part of the project.
+# Anchored. Unanchored, this matched at every depth and was quietly ignoring nine
+# tracked files under argus/rules/ and examples/rules/ — so a new module added
+# there would have been invisible to `git add -A` and shipped missing.
+/rules/

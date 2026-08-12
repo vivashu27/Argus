@@ -74,88 +74,118 @@ class Payload:
     #: as a summary line rather than as part of the body.
     source_text: str | None = None
     source_path: Path | None = None
+    #: Lazily built in _segment_texts. Each verdict resolves a quote two or three
+    #: times, so recomputing the split per call meant ~10 passes over the body per
+    #: asset for no gain.
+    _segment_cache: list[tuple[Segment, str]] | None = field(default=None, repr=False)
 
     @property
     def approx_tokens(self) -> int:
         """Rough size, for a cost estimate shown before anything is sent."""
         return len(self.body) // 4
 
-    def find(self, quote: str) -> int:
-        """Offset of a quote in the body, ignoring how whitespace is broken up.
+    def _segment_texts(self) -> list[tuple[Segment, str]]:
+        if self._segment_cache is None:
+            lines = self.body.split("\n")
+            self._segment_cache = [
+                (segment, "\n".join(lines[segment.first_line - 1 : segment.last_line]))
+                for segment in self.segments
+            ]
+        return self._segment_cache
 
-        Exact substring matching looked right and was wrong. Prose in a SKILL.md is
-        hard-wrapped, so a sentence spanning two lines contains a newline that the
-        model does not reproduce when it quotes the sentence back. Every finding in
-        wrapped text was therefore rejected as fabricated — the first real run lost
-        a true positive to it.
+    def find(self, quote: str) -> bool:
+        """Whether the quote genuinely appears inside one region of the payload.
 
-        Collapsing whitespace on both sides keeps the property that matters, which
-        is that the words are genuinely present, while dropping the one that never
-        did: that the line breaks match.
+        Matching ignores how whitespace is broken up. Exact substring matching
+        looked right and was wrong: prose in a SKILL.md is hard-wrapped, so a
+        sentence spanning two lines contains a newline the model does not reproduce
+        when quoting it back, and every finding in wrapped text was rejected as
+        fabricated. The first real run lost a true positive to it.
+
+        Matching is confined to a single segment. Searching the concatenated body
+        would let a quote straddle two different files, or a file and a separator
+        Argus wrote, and still be called grounded — and the citation could then name
+        only the first of them.
         """
-        needle = " ".join(quote.split())
+        return self._match(quote) is not None
+
+    def _match(self, quote: str) -> tuple[Segment, int] | None:
+        """The segment containing the quote, and the 0-based line within it."""
+        needle = normalise(quote)
         if not needle:
-            return -1
-        haystack, offsets = _collapsed(self.body)
-        position = haystack.find(needle)
-        return offsets[position] if position >= 0 else -1
+            return None
+        for segment, text in self._segment_texts():
+            offset = _find_normalised(text, needle)
+            if offset >= 0:
+                return segment, text.count("\n", 0, offset)
+        return None
 
     def locate(self, quote: str) -> tuple[Path | None, int | None]:
         """Resolve a quote back to the file and line it came from.
 
-        Returns ``(None, None)`` when the quote is not in the body — which the
-        reviewer already treats as a fabricated citation — and ``(path, None)``
-        when the text is real but sits in a header Argus composed rather than in
-        the file itself.
+        Never returns a line without a path: a bare ``:12`` in a report points the
+        reader at nothing, and the reporters concatenate the two without checking.
         """
-        index = self.find(quote)
-        if index < 0:
+        found = self._match(quote)
+        if found is None:
             return None, None
-        line_in_body = self.body.count("\n", 0, index) + 1
-        for segment in self.segments:
-            if segment.first_line <= line_in_body <= segment.last_line:
-                if segment.source_line is None:
-                    return segment.path, self._line_in_source(quote)
-                return segment.path, segment.source_line + (line_in_body - segment.first_line)
-        return None, None
+        segment, line_within = found
+        if segment.path is None:
+            return None, None
+        if segment.source_line is None:
+            return segment.path, self._line_in_source(quote, segment)
+        return segment.path, segment.source_line + line_within
 
-    def _line_in_source(self, quote: str) -> int | None:
-        """Find a quote directly in the asset's file.
+    def _line_in_source(self, quote: str, segment: Segment) -> int | None:
+        """Find a quote directly in the asset's own file.
 
-        The fallback for text that reaches the payload through a composed header.
-        A skill's ``description:`` is summarised into the header, but it is also a
-        real line of the real file, and a finding about it should say which.
+        The fallback for text that reaches the payload through a header Argus
+        composed: a skill's ``description:`` is summarised into that header, but it
+        is also a real line of a real file.
+
+        Guarded on the segment naming the same file the verbatim text came from.
+        Without that, a quote from a composed separator would be looked up in an
+        unrelated file and could match coincidentally, producing a confident
+        citation to a line that has nothing to do with the finding.
         """
-        if not self.source_text:
+        if not self.source_text or segment.path != self.source_path:
             return None
-        haystack, offsets = _collapsed(self.source_text)
-        needle = " ".join(quote.split())
-        position = haystack.find(needle)
-        if position < 0:
-            return None
-        return self.source_text.count("\n", 0, offsets[position]) + 1
+        offset = _find_normalised(self.source_text, normalise(quote))
+        return None if offset < 0 else self.source_text.count("\n", 0, offset) + 1
 
 
-def _collapsed(text: str) -> tuple[str, list[int]]:
-    """Whitespace-normalised text, plus the original offset of each character.
+def normalise(quote: str) -> str:
+    """Collapse whitespace, so line wrapping cannot make a real quote look invented."""
+    return " ".join(quote.split())
 
-    The offset list is what lets a match in the normalised string be reported as a
-    line in the real file, so normalising does not cost the location.
+
+def _find_normalised(text: str, needle: str) -> int:
+    """Offset in ``text`` of a whitespace-insensitive match, or -1.
+
+    The offset list is what lets a match in the collapsed string be reported as a
+    line in the real file, so ignoring whitespace does not cost the location.
+
+    One implementation, used for both the payload and the asset's own file. It was
+    written twice and the copies had already drifted — a later change to the
+    matching rule would have been made once and silently missed the other.
     """
-    out: list[str] = []
+    if not needle:
+        return -1
+    collapsed: list[str] = []
     offsets: list[int] = []
     in_space = False
     for index, char in enumerate(text):
         if char.isspace():
-            if not in_space and out:
-                out.append(" ")
+            if not in_space and collapsed:
+                collapsed.append(" ")
                 offsets.append(index)
             in_space = True
             continue
         in_space = False
-        out.append(char)
+        collapsed.append(char)
         offsets.append(index)
-    return "".join(out), offsets
+    position = "".join(collapsed).find(needle)
+    return offsets[position] if position >= 0 else -1
 
 
 class _Body:
@@ -202,7 +232,13 @@ def _redact(text: str) -> tuple[str, list[str]]:
 
     # Whole offending lines are replaced. Surgical replacement of just the value
     # would need the raw secret, which the scanner deliberately never returns.
-    lines = text.splitlines()
+    #
+    # Split on "\n" rather than with splitlines(): the latter also breaks on \r,
+    # \x0b, \x0c, \x85, \u2028 and \u2029, so rejoining with "\n" turns each of
+    # those into a real newline and shifts every line number after it. The segment
+    # map is built before this runs, so the result would be a confidently wrong
+    # file:line on any asset containing one — and read_text does not translate them.
+    lines = text.split("\n")
     for match in matches:
         index = match.line - 1
         if 0 <= index < len(lines):
@@ -239,12 +275,20 @@ def _describe(asset: Asset) -> tuple[str, _Body]:
         body.add(
             str(data.get("body") or ""),
             path=asset.path,
-            source_line=int(data.get("body_offset") or 0) + 1,
+            source_line=(int(data.get("body_offset") or 0) + 1)
+            if asset.text_is_verbatim
+            else None,
         )
         return "Claude Skill", body
 
     if asset.target is Target.INSTRUCTIONS:
-        body.add(asset.text or "", path=asset.path, source_line=1)
+        # Guarded rather than assumed: a line into text that was reconstructed
+        # rather than read points at nothing the reader can open.
+        body.add(
+            asset.text or "",
+            path=asset.path,
+            source_line=1 if asset.text_is_verbatim else None,
+        )
         return "Instruction file", body
 
     if asset.target is Target.HOOKS:
@@ -260,8 +304,12 @@ def _describe(asset: Asset) -> tuple[str, _Body]:
         if script:
             script_path = data.get("script_path")
             body.add(f"\n--- hook script ({script_path}) ---")
+            # Not capped at MAX_FILE_CHARS. That cap exists to stop one file in a
+            # multi-file asset crowding out the others; a hook has exactly one, so
+            # applying it here just cut 4x of script out of review for no benefit.
+            # The MAX_BODY_CHARS budget still bounds the whole payload.
             body.add(
-                _truncate(str(script), MAX_FILE_CHARS),
+                str(script),
                 path=Path(script_path) if script_path else None,
                 source_line=1,
             )
@@ -324,6 +372,13 @@ def build(asset: Asset) -> Payload:
         body=redacted,
         redactions=removed,
         segments=composed.segments,
-        source_text=asset.text if asset.text_is_verbatim else None,
+        # Retained only for SKILLS, the one target whose composed header summarises
+        # real lines of the file. Holding a second copy of every instruction file
+        # and settings file for a fallback that never fires is pure memory.
+        source_text=(
+            asset.text
+            if asset.target is Target.SKILLS and asset.text_is_verbatim
+            else None
+        ),
         source_path=asset.path,
     )
