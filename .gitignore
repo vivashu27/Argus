@@ -18,7 +18,13 @@ htmlcov/
 
 # Scan output — contains hostnames, local file paths and findings about the
 # machine it ran on. Never commit these.
+#
+# The directories are listed as well as the filename patterns. Every file under
+# output/ happened to match argus-report-*, so the folder looked ignored while
+# actually being ignored one file at a time — a report saved under any other name
+# would have been committed by the next `git add -A`.
 reports/
+output/
 argus_output/
 argus-output/
 *.sarif
