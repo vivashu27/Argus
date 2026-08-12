@@ -25,8 +25,8 @@ Argus treats every discovered file as untrusted input. It **never**:
 - runs commands found in configuration or instruction files
 - deserializes scanned content into executable objects (`yaml.safe_load` only)
 
-It is intended to be safe to point at a deliberately malicious configuration. See
-[`docs/threat-model.md`](docs/threat-model.md).
+It is intended to be safe to point at a deliberately malicious configuration. See [`docs/threat-model.md`](docs/threat-model.md).
+
 ---
 
 ## Install
