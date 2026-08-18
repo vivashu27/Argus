@@ -170,8 +170,27 @@ class TestSafety:
         assert report.result.metadata.unreadable_paths or report.summary.total > 0
 
 
+@pytest.fixture
+def clean_env(monkeypatch):
+    """Remove credential-shaped variables from the process environment.
+
+    ``platform.relevant_env_vars`` reads the real ``os.environ``, and SECRET-005
+    flags a high-entropy value there — correctly, that is its job. But a test whose
+    subject is a clean *configuration* must not be perturbed by the shell it runs
+    in, and this one was: anyone with ANTHROPIC_API_KEY exported saw it fail, which
+    is every contributor who has used `argus review` or `argus rule new`, since
+    both require exactly that variable.
+    """
+    for name in list(os.environ):
+        upper = name.upper()
+        if upper.startswith(("CLAUDE", "ANTHROPIC", "MCP", "OPENAI")) or any(
+            key in upper for key in ("API_KEY", "TOKEN", "SECRET", "CREDENTIAL", "PASSWORD")
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+
 class TestPipeline:
-    def test_clean_environment_scores_well(self, tmp_path):
+    def test_clean_environment_scores_well(self, tmp_path, clean_env):
         home = tmp_path / "home"
         project = tmp_path / "project"
         (home / ".claude").mkdir(parents=True)
