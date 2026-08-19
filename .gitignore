@@ -59,4 +59,7 @@ claude_session
 /rules/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
-graft/
+# Anchored: unanchored, this also matched .claude/skills/graft/, so the tracked
+# SKILL.md there was shadowed and edits to it would not have been picked up by
+# `git add -A`. Same failure the /rules/ entry above was fixed for.
+/graft/
