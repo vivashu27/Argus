@@ -241,12 +241,15 @@ argus rule new "flag MCP servers passing a credential path as an argument" \
     --output ./rules/mcp-creds.argus
 ```
 
-Providers: `openai`, `anthropic`, `moonshot`, `deepseek`.
+Providers: `openai`, `anthropic`, `moonshot`, `deepseek`, `openrouter`. OpenRouter
+takes vendor-prefixed model slugs — `--model anthropic/claude-sonnet-4`.
 
 **Only your prompt and the rule schema are transmitted.** No scanned configuration,
 file contents, paths or hostname — you can run this without having scanned anything.
 The provider and its processing jurisdiction are printed before sending; Moonshot and
-DeepSeek are PRC-hosted.
+DeepSeek are PRC-hosted. OpenRouter is a router, not a host: it forwards to an
+upstream provider selected by the model slug, so its jurisdiction is reported as
+varying rather than named.
 
 The model produces a rule, not a verdict. That distinction matters: its output is
 data you read and commit rather than a judgement you have to trust, and it is

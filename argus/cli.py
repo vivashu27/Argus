@@ -423,8 +423,8 @@ def check(
 @app.command()
 def review(
     path: Path | None = typer.Option(None, "--path", "-p", help="Project root to review."),
-    provider_name: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, openai, moonshot, deepseek."),
-    model: str | None = typer.Option(None, "--model", help="Override the provider's default model."),
+    provider_name: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, openai, moonshot, deepseek, openrouter."),
+    model: str | None = typer.Option(None, "--model", help="Override the provider's default model. OpenRouter takes vendor-prefixed slugs, e.g. anthropic/claude-sonnet-4."),
     target: list[str] | None = typer.Option(None, "--target", "-t", help="Limit to: mcp, skills, hooks, instructions, plugins."),
     component: list[str] | None = typer.Option(None, "--component", help="Review only components whose id contains this. Repeatable."),
     limit: int = typer.Option(0, "--limit", help="Review at most N components. 0 means no limit."),
@@ -555,7 +555,7 @@ app.add_typer(rule_app)
 def rule_new(
     prompt: str = typer.Argument(..., help="Describe what the rule should detect."),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write to this path instead of stdout."),
-    provider: str = typer.Option("openai", "--provider", help="openai | anthropic | moonshot | deepseek."),
+    provider: str = typer.Option("openai", "--provider", help="openai | anthropic | moonshot | deepseek | openrouter."),
     model: str | None = typer.Option(None, "--model", help="Override the provider default model."),
     force: bool = typer.Option(False, "--force", help="Overwrite an existing file."),
 ) -> None:

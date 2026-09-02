@@ -228,18 +228,22 @@ reported and skipped; it never stops the others. Full reference in
 ### Writing rules with AI
 
 ```bash
-export OPENAI_API_KEY=...    # or ANTHROPIC_/MOONSHOT_/DEEPSEEK_API_KEY
+export OPENAI_API_KEY=...    # or ANTHROPIC_/MOONSHOT_/DEEPSEEK_/OPENROUTER_API_KEY
 argus rule new "flag MCP servers that pass a credential path as an argument" \
     --output ./rules/mcp-creds.argus
 ```
 
-Providers: `openai`, `anthropic`, `moonshot` (Kimi), `deepseek`. No extra
-dependencies — all four are reached over the standard library.
+Providers: `openai`, `anthropic`, `moonshot` (Kimi), `deepseek`, `openrouter`. No
+extra dependencies — all five are reached over the standard library. OpenRouter
+fronts several hundred models from other vendors; name one with `--model` using its
+vendor-prefixed slug, e.g. `--model anthropic/claude-sonnet-4`.
 
 **What gets sent is your prompt and the rule schema. Nothing else.** No scanned
 configuration, no file contents, no paths, no hostname; you can run it without having
 scanned anything. Argus prints the provider and its processing jurisdiction before
-sending, and Moonshot and DeepSeek are PRC-hosted.
+sending, and Moonshot and DeepSeek are PRC-hosted. OpenRouter has no single
+jurisdiction — it forwards to an upstream provider chosen by the model slug, so
+where the prompt is processed depends on which model you pick.
 
 The model writes a **rule**, not a verdict. Its output is data you read, edit and
 commit, and it is validated against the schema before being written, so a bad
@@ -411,7 +415,14 @@ static coverage at all.
 argus review --dry-run          # what would be sent, and roughly what it costs
 argus review                    # review MCP servers, Skills, hooks, instructions, plugins
 argus review --target skills --limit 5
+argus review --provider openrouter --model anthropic/claude-sonnet-4
 ```
+
+The provider is chosen with `--provider` (`anthropic`, `openai`, `moonshot`,
+`deepseek`, `openrouter`) and its key comes from the environment only. With
+`openrouter`, `--model` takes a vendor-prefixed slug and reaches any model in
+OpenRouter's catalogue; because that catalogue changes, name the model rather than
+relying on the built-in default.
 
 | Check | Asks |
 |---|---|

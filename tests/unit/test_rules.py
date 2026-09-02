@@ -534,6 +534,57 @@ class TestProviderErrors:
             provider.complete("s", "u")
 
 
+class TestOpenRouter:
+    """OpenRouter is a router on the OpenAI wire, not a fifth wire format."""
+
+    def test_spec_is_openai_shaped(self):
+        from argus.rules.providers import build_provider
+
+        provider = build_provider("openrouter", api_key="k")
+        assert provider.spec.endpoint == "https://openrouter.ai/api/v1/chat/completions"
+        assert provider.spec.style == "openai"
+        assert provider.model == "anthropic/claude-sonnet-4"
+
+    def test_authenticates_with_a_bearer_token(self):
+        """Taking the anthropic branch here would send the key in the wrong header."""
+        from argus.rules.providers import build_provider
+
+        headers = build_provider("openrouter", api_key="k")._headers()
+        assert headers["authorization"] == "Bearer k"
+        assert "x-api-key" not in headers
+
+    def test_missing_key_names_the_variable_to_export(self, monkeypatch):
+        from argus.rules.providers import LLMError, build_provider
+
+        # Cleared explicitly: a real key in the developer's environment would
+        # otherwise make this pass without testing anything.
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        with pytest.raises(LLMError, match="OPENROUTER_API_KEY"):
+            build_provider("openrouter")
+
+    def test_parses_an_openrouter_response(self):
+        from argus.rules.providers import build_provider
+
+        def _t(spec, raw):
+            return {
+                "model": "anthropic/claude-sonnet-4",
+                "choices": [{"message": {"role": "assistant", "content": "{}"}}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 2},
+            }
+
+        response = build_provider("openrouter", api_key="k", transport=_t).complete("s", "u")
+        assert response.text == "{}"
+        assert response.provider == "openrouter"
+        assert response.model == "anthropic/claude-sonnet-4"
+        assert response.prompt_tokens == 11
+
+    def test_jurisdiction_is_not_a_country(self):
+        """A router has no fixed one, and the consent line must not invent it."""
+        from argus.rules.providers import SPECS
+
+        assert "varies" in SPECS["openrouter"].jurisdiction.lower()
+
+
 class TestRecordProvenance:
     """A match inside a nested record belongs to that record's file, not the asset's."""
 

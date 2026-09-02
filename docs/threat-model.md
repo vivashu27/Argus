@@ -125,7 +125,9 @@ This command is the only network path in Argus, and it is not part of scanning:
 - **What is sent is your prompt and the rule schema.** No scanned configuration, no
   file contents, no paths, no hostname. You can run it without having scanned
   anything. Argus prints the provider and its processing jurisdiction first;
-  Moonshot and DeepSeek are PRC-hosted.
+  Moonshot and DeepSeek are PRC-hosted, and OpenRouter forwards to an upstream
+  provider chosen by the model slug, so it is reported as having no fixed
+  jurisdiction rather than being assigned one Argus cannot verify.
 - **The model writes data, not verdicts.** Its output is a rule you read, edit and
   commit. A generated rule is validated against the schema before it is written, so
   invalid output is an error rather than a rule that silently never matches. Because

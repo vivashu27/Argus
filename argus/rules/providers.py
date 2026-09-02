@@ -9,8 +9,12 @@ for what is, per provider, a single JSON POST. ``urllib.request`` covers it.
 
 Two shapes are needed, not four:
 
-* **OpenAI-compatible** — OpenAI, Moonshot (Kimi) and DeepSeek all expose
-  ``POST /chat/completions`` with the same body and a bearer token.
+* **OpenAI-compatible** — OpenAI, Moonshot (Kimi), DeepSeek and OpenRouter all
+  expose ``POST /chat/completions`` with the same body and a bearer token.
+  OpenRouter is a router rather than a model host: its model ids are
+  vendor-prefixed slugs (``anthropic/claude-sonnet-4``), not the bare names the
+  other three take, and its catalogue changes without notice, so pass ``--model``
+  rather than relying on the default outliving this release.
 * **Anthropic** — ``POST /v1/messages``, with ``x-api-key`` and a version header,
   and ``system`` as a top-level field rather than a message role.
 
@@ -89,6 +93,21 @@ SPECS: dict[str, ProviderSpec] = {
         key_env="DEEPSEEK_API_KEY",
         style="openai",
         jurisdiction="China (PRC)",
+    ),
+    "openrouter": ProviderSpec(
+        name="openrouter",
+        endpoint="https://openrouter.ai/api/v1/chat/completions",
+        default_model="anthropic/claude-sonnet-4",
+        key_env="OPENROUTER_API_KEY",
+        style="openai",
+        # OpenRouter forwards to whichever upstream serves the chosen model, so no
+        # single country is true here. The consent line is where the operator
+        # decides whether to allow the transfer; naming a jurisdiction Argus cannot
+        # vouch for would be worse than admitting it does not know.
+        jurisdiction=(
+            "varies — OpenRouter forwards to an upstream provider whose location "
+            "depends on the model"
+        ),
     ),
 }
 
