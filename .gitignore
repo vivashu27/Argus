@@ -52,6 +52,13 @@ claude_session
 # carries its own rule so `git add -A` cannot pick it up on any clone.
 .claude/settings.local.json
 
+# The instruction files Claude Code reads in this repository. Untracked on
+# request: they are this checkout's working notes, not something a clone needs.
+# Anchored, both of them — unanchored, `CLAUDE.md` would match at every depth,
+# which is the exact failure the /rules/ and /graft/ entries below were fixed for.
+/CLAUDE.md
+/.claude/CLAUDE.md
+
 # Local rule authoring — personal templates, not part of the project.
 # Anchored. Unanchored, this matched at every depth and was quietly ignoring nine
 # tracked files under argus/rules/ and examples/rules/ — so a new module added
