@@ -45,19 +45,30 @@ argus.yaml
 project_outline.txt
 claude_session
 
-# Per-machine Claude Code overrides. The project's .claude/settings.json is
-# shared; settings.local.json is personal and holds absolute paths under
-# /home/<user>. A global ignore covered it, but a global ignore is a property of
-# one machine, and it does not apply once a file has been staged — this repo
-# carries its own rule so `git add -A` cannot pick it up on any clone.
-.claude/settings.local.json
-
-# The instruction files Claude Code reads in this repository. Untracked on
-# request: they are this checkout's working notes, not something a clone needs.
-# Anchored, both of them — unanchored, `CLAUDE.md` would match at every depth,
-# which is the exact failure the /rules/ and /graft/ entries below were fixed for.
+# This checkout's own agent tooling — Claude Code config, the graft MCP server
+# registration, and the ripgrep rule that re-admits graft's cards to search.
+# None of it belongs to Argus: graft is not a dependency, appears in no README or
+# doc, and is in no clone's PATH.
+#
+# .claude/settings.json is the reason this is a security matter and not just
+# tidiness. It registers SessionStart, PostToolUse, UserPromptSubmit and Stop
+# hooks that run .claude/helpers/graft-hooks.cjs, so anyone who cloned this repo
+# and opened it in Claude Code executed a file out of it without being asked —
+# the exact shape Argus's own AASB hook checks exist to report. The helpers also
+# hardcode /usr/local/lib/node_modules/@nanonets/graft, which is one machine's
+# path and no one else's.
+#
+# Anchored. Unanchored, `.claude/` would match at every depth and swallow the
+# fixture directories the test suite builds; that class of mistake already cost
+# this file two comments below.
+/.claude/
+/.mcp.json
+/.ignore
 /CLAUDE.md
-/.claude/CLAUDE.md
+
+# Serena's project cache — pickled symbol data and a local override file. It was
+# never ignored, so the next `git add -A` would have committed the .pkl files.
+/.serena/
 
 # Local rule authoring — personal templates, not part of the project.
 # Anchored. Unanchored, this matched at every depth and was quietly ignoring nine
@@ -70,3 +81,16 @@ claude_session
 # SKILL.md there was shadowed and edits to it would not have been picked up by
 # `git add -A`. Same failure the /rules/ entry above was fixed for.
 /graft/
+
+# Editor and OS droppings
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build and environment leftovers
+node_modules/
+*.log
+.tox/
+.direnv/
