@@ -15,7 +15,7 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
-
+test/
 # Scan output — contains hostnames, local file paths and findings about the
 # machine it ran on. Never commit these.
 #
