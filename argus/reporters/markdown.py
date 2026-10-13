@@ -106,12 +106,17 @@ def render(report: ScanReport) -> str:
         if finding.evidence:
             out.append("**Evidence.**\n")
             for item in finding.evidence:
-                location = item.path or ""
+                def literal(value: str) -> str:
+                    # Encode every character so input cannot introduce Markdown syntax.
+                    # Whitespace is normalized to prevent injected block boundaries.
+                    return "".join(f"&#{ord(c)};" for c in " ".join(value.split()))
+
+                location = literal(item.path or "")
                 if item.line:
                     location += f":{item.line}"
-                key = f" `{item.key}`" if item.key else ""
-                snippet = f" — `{item.snippet}`" if item.snippet else ""
-                out.append(f"- {location}{key}{snippet}  \n  {item.reason}")
+                key = f" {literal(item.key)}" if item.key else ""
+                snippet = f" — {literal(item.snippet)}" if item.snippet else ""
+                out.append(f"- {location}{key}{snippet}  \n  {literal(item.reason)}")
             out.append("")
 
         if finding.accepted_risk:
