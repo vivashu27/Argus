@@ -8,6 +8,7 @@ accident.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -77,6 +78,13 @@ def _select(assets: list[Asset], wanted: set[Target], only: set[str] | None) -> 
     ]
 
 
-def run(payloads: list[Payload], provider: Provider) -> list[Review]:
-    """Review each payload in turn."""
-    return [review(payload, provider) for payload in payloads]
+def run(payloads: list[Payload], provider: Provider, workers: int = 1) -> list[Review]:
+    """Review every payload, up to ``workers`` requests in flight, in input order.
+
+    Threads suit this: each review is one blocking HTTP call, and ``review`` never
+    raises, so one failed component cannot cancel the others.
+    """
+    if workers <= 1 or len(payloads) <= 1:
+        return [review(payload, provider) for payload in payloads]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(lambda payload: review(payload, provider), payloads))

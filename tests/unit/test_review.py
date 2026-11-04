@@ -598,3 +598,40 @@ class TestReviewFindingsFromCodeReview:
 
     def test_source_text_is_kept_only_where_the_fallback_can_use_it(self):
         assert build(_asset()).source_text is None  # instructions: no composed header
+
+
+class TestParallelReview:
+    def _payloads(self, n: int):
+        return [build(_asset(asset_id=f"instructions:project:{i}.md")) for i in range(n)]
+
+    def test_reviews_run_concurrently_and_keep_input_order(self):
+        import threading
+
+        from argus.reviewer_cli import run
+        from argus.rules.providers import build_provider
+
+        # Two requests must be in flight together to pass; run sequentially, this
+        # times out and the error escapes the transport.
+        barrier = threading.Barrier(2, timeout=5)
+
+        def transport(spec, raw):
+            barrier.wait()
+            return {"model": "mock", "choices": [{"message": {"content": "{}"}}]}
+
+        provider = build_provider("openai", api_key="k", transport=transport)
+        payloads = self._payloads(4)
+        reviews = run(payloads, provider, workers=2)
+        assert [r.asset_id for r in reviews] == [p.asset_id for p in payloads]
+
+    def test_one_failure_does_not_stop_the_others(self):
+        from argus.reviewer_cli import run
+        from argus.rules.providers import LLMError, build_provider
+
+        def transport(spec, raw):
+            if b"1.md" in raw:
+                raise LLMError("openai: HTTP 429 — rate limited")
+            return {"model": "mock", "choices": [{"message": {"content": "{}"}}]}
+
+        provider = build_provider("openai", api_key="k", transport=transport)
+        reviews = run(self._payloads(3), provider, workers=3)
+        assert ["429" in (r.error or "") for r in reviews] == [False, True, False]

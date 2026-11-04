@@ -428,6 +428,7 @@ def review(
     target: list[str] | None = typer.Option(None, "--target", "-t", help="Limit to: mcp, skills, hooks, instructions, plugins."),
     component: list[str] | None = typer.Option(None, "--component", help="Review only components whose id contains this. Repeatable."),
     limit: int = typer.Option(0, "--limit", help="Review at most N components. 0 means no limit."),
+    workers: int = typer.Option(4, "--workers", "-w", min=1, max=32, help="Components reviewed in parallel. Lower it if the provider rate-limits you."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be sent and the estimated cost, then stop."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     fmt: list[str] | None = typer.Option(None, "--format", "-f", help=f"Output format, repeatable. One of: {', '.join(FORMATS)}."),
@@ -517,7 +518,7 @@ def review(
     if not yes and not typer.confirm("Send these components for review?"):
         _fail("cancelled — nothing was sent.", EXIT_OK)
 
-    reviews = run_reviews(payloads, provider)
+    reviews = run_reviews(payloads, provider, workers=workers)
     for item in reviews:
         if item.error:
             err_console.print(Text(f"  {item.asset_id}: {item.error}", style="yellow"))
