@@ -81,7 +81,11 @@ HIGH_CONFIDENCE: tuple[_Pattern, ...] = (
 # Stage 2 — generic assignments, entropy-corroborated
 # ---------------------------------------------------------------------------
 GENERIC_ASSIGNMENT = re.compile(
-    r"""(?P<key>[A-Za-z0-9_\-.]*(?:api[_\-]?key|apikey|secret|token|password|passwd|
+    # The lookbehind starts matches only at a key boundary. Without it every position
+    # inside a long token is retried, which is quadratic and dominated scan time; any
+    # mid-word match has an equivalent leftmost one, so results are unchanged.
+    r"""(?<![A-Za-z0-9_\-.])
+        (?P<key>[A-Za-z0-9_\-.]*(?:api[_\-]?key|apikey|secret|token|password|passwd|
         pwd|credential|auth|access[_\-]?key|private[_\-]?key|client[_\-]?secret)
         [A-Za-z0-9_\-.]*)
         \s*[:=](?![:=>])\s*
@@ -173,17 +177,28 @@ def _is_local_credential_url(line: str, value: str) -> bool:
     return False
 
 
+#: Lines longer than this are not scanned. Callers that must not leak an unscanned
+#: line (review payloads) have to drop such lines themselves.
+MAX_SCAN_LINE = 4000
+
+
 def scan_text(text: str, *, max_findings: int = 50) -> list[SecretMatch]:
     """Scan text for credentials. Returns redacted matches only."""
     matches: list[SecretMatch] = []
     seen: set[tuple[str, int]] = set()
     lines = text.splitlines()
+    # One whole-text search per pattern rules most of them out, so the per-line pass
+    # skips them. Safe because a match inside a line is also a match in the text: the
+    # patterns use no anchors, and \b sees a line separator as the non-word it is.
+    patterns = [p for p in HIGH_CONFIDENCE if p.regex.search(text)]
+    if not patterns and not GENERIC_ASSIGNMENT.search(text):
+        return matches
 
     for lineno, line in enumerate(lines, start=1):
-        if len(line) > 4000:  # a minified bundle is not worth entropy-scanning
+        if len(line) > MAX_SCAN_LINE:  # a minified bundle is not worth entropy-scanning
             continue
 
-        for pattern in HIGH_CONFIDENCE:
+        for pattern in patterns:
             for match in pattern.regex.finditer(line):
                 value = match.group(pattern.group) if pattern.group else match.group(0)
                 if pattern.kind != "private_key" and is_placeholder(value):
