@@ -27,6 +27,11 @@ def _skills(context: CheckContext) -> list[Asset]:
     return context.by_target(Target.SKILLS)
 
 
+def _sensitive_lines(text: str) -> set[int]:
+    """Lines SKILL-002 reports, so other Skill checks can leave them to it."""
+    return {n for n, line in enumerate(text.splitlines(), start=1) if touches_sensitive(line)[0]}
+
+
 def _all_text(asset: Asset) -> list[tuple[str, str]]:
     """Every text surface of a Skill: its body plus each bundled script."""
     surfaces: list[tuple[str, str]] = [(str(asset.path), asset.text or "")]
@@ -102,12 +107,15 @@ class SkillSensitiveFilesystem(Check):
     meta = CheckMeta(
         check_id="SKILL-002",
         title="Skill accesses sensitive filesystem paths",
-        description="Skill text or a bundled script references a known credential location.",
+        description="Skill text references a known credential location.",
         category=Category.SKILLS,
         severity=Severity.HIGH,
         aasb_level=1,
         applies_to=SKILLS_ONLY,
-        rationale="A Skill referencing ~/.ssh or ~/.aws is directing the agent at credentials.",
+        rationale=(
+            "A Skill referencing ~/.ssh or ~/.aws is directing the agent at credentials. "
+            "Bundled scripts are covered by SKILL-009, so no line is counted twice."
+        ),
         security_impact="Credentials can be read into context and then transmitted anywhere the agent can reach.",
         remediation="Remove the credential path reference from the Skill.",
         references=("https://docs.anthropic.com/en/docs/claude-code/skills",),
@@ -126,7 +134,7 @@ class SkillSensitiveFilesystem(Check):
         for asset in assets:
             evidence = []
             doc_surfaces, all_surfaces = 0, 0
-            for path, text in _all_text(asset):
+            for path, text in [(str(asset.path), asset.text or "")]:
                 hits = []
                 for lineno, line in enumerate(text.splitlines(), start=1):
                     hit, description = touches_sensitive(line)
@@ -174,7 +182,10 @@ class SkillPromptInjection(Check):
         applies_to=SKILLS_ONLY,
         rationale=(
             "Skill bodies are loaded directly into the model's context. Static analysis "
-            "cannot establish intent, so this reports potential injection only."
+            "cannot establish intent, so this reports potential injection only. "
+            "Security-override and concealment directives are reported by SKILL-004, "
+            "remote instructions by SKILL-005, and reads of known credential paths by "
+            "SKILL-002 instead, so no line is counted twice."
         ),
         security_impact="An injected directive can redirect agent behaviour whenever the Skill activates.",
         remediation="Review the flagged lines and remove any directive that overrides operator instructions.",
@@ -199,7 +210,17 @@ class SkillPromptInjection(Check):
                 asset.data.get("body") or asset.text or "",
                 line_offset=int(asset.data.get("body_offset") or 0),
             )
-            actionable = [m for m in matches if m.is_actionable]
+            # SKILL-004 and SKILL-005 report these families; counting them here too
+            # listed the same line under two checks and deducted twice.
+            claimed = (*SkillSecurityOverride.FAMILIES, "remote_instruction")
+            # A read of a credential path is SKILL-002's finding on the same line.
+            path_lines = _sensitive_lines(asset.text or "")
+            actionable = [
+                m for m in matches
+                if m.is_actionable and m.family not in claimed
+                and not (m.pattern_id == "read-credentials" and m.line in path_lines)
+            ]
+            low = [m for m in matches if not m.is_actionable]
             if actionable:
                 confidence = (
                     Confidence.HIGH
@@ -223,7 +244,7 @@ class SkillPromptInjection(Check):
                         confidence=confidence,
                     )
                 )
-            elif matches:
+            elif low:
                 findings.append(
                     self.warn(
                         asset.asset_id,
@@ -231,7 +252,7 @@ class SkillPromptInjection(Check):
                         [
                             self.evidence(path=asset.path, line=m.line, snippet=m.context,
                                           reason=m.description)
-                            for m in matches[:4]
+                            for m in low[:4]
                         ],
                         confidence=Confidence.LOW,
                     )
@@ -335,12 +356,17 @@ class SkillExternalInstructions(Check):
         findings: list[Finding] = []
         for asset in assets:
             text = asset.data.get("body") or asset.text or ""
+            command_lines = {
+                m.line for m in commands.scan_text(asset.text or "") if m.is_failing
+            }
             remote = [
                 m
                 for m in injection.scan_text(
                     text, line_offset=int(asset.data.get("body_offset") or 0)
                 )
                 if m.family == "remote_instruction" and m.is_actionable
+                # A literal `curl | sh` is SKILL-008's dangerous command on the same line.
+                and not (m.pattern_id == "url-then-execute" and m.line in command_lines)
             ]
             suspicious = [
                 (line, host, url)
@@ -562,8 +588,8 @@ class SkillCredentialDirectoryAccess(Check):
         aasb_level=1,
         applies_to=SKILLS_ONLY,
         rationale=(
-            "SKILL-002 covers references anywhere in the Skill; this narrows to executable "
-            "scripts, where the access is an action rather than a mention."
+            "SKILL-002 covers the Skill's text; this covers its executable scripts, where "
+            "the access is an action rather than a mention."
         ),
         security_impact="Credentials are read by a subprocess outside the tool permission model.",
         remediation="Remove credential access from bundled scripts.",

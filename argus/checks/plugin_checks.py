@@ -108,7 +108,8 @@ class PluginDangerousHooks(Check):
         applies_to=PLUGINS_ONLY,
         rationale=(
             "Plugin hooks execute automatically on agent events, without appearing as tool "
-            "calls the operator can approve."
+            "calls the operator can approve. Hook files the HOOK-* checks evaluate are "
+            "left to HOOK-003; this covers the rest of the plugin's hooks/ directory."
         ),
         security_impact="Gives the plugin an automatic, unattended execution path on every matching event.",
         remediation="Review the hook, narrow its matcher, and remove dangerous commands.",
@@ -129,10 +130,18 @@ class PluginDangerousHooks(Check):
             if not asset.data.get("has_hooks"):
                 findings.append(self.not_applicable(asset.asset_id, "Plugin ships no hooks"))
                 continue
+            hook_files = {
+                str(p)
+                for hook in context.by_target(Target.HOOKS)
+                for p in (hook.path, hook.data.get("script_path"))
+                if p
+            }
 
             evidence = []
             for entry in asset.data.get("files") or []:
                 if "/hooks/" not in f"/{entry['relative']}" and not entry["relative"].startswith("hooks/"):
+                    continue
+                if entry["path"] in hook_files:  # HOOK-003 evaluates it, more precisely
                     continue
                 for match in commands.scan_text(entry["text"]):
                     if match.is_failing:

@@ -201,7 +201,7 @@ Settings disable the interactive approval gate or opt out of sandboxing.
 
 High-impact tools are pre-authorised in the allow list with no corresponding ask rule requiring confirmation.
 
-**Detection rationale.** An allow rule silences the approval prompt for that tool. Where the tool can execute code or write files, that removes the human review step entirely.
+**Detection rationale.** An allow rule silences the approval prompt for that tool. Where the tool can execute code or write files, that removes the human review step entirely. Unscoped Bash, file and network grants are reported by CLAUDE-002, CLAUDE-003 and CLAUDE-005; this covers dangerous tools none of them owns, so no grant is counted twice.
 
 **Security impact.** Injected instructions can reach destructive tooling without the operator observing the call.
 
@@ -613,9 +613,9 @@ The Skill grants itself the Bash tool without argument scoping, or bundles a she
 
 **AASB 3.2** · Level 1 · **HIGH** · applies to: skills
 
-Skill text or a bundled script references a known credential location.
+Skill text references a known credential location.
 
-**Detection rationale.** A Skill referencing ~/.ssh or ~/.aws is directing the agent at credentials.
+**Detection rationale.** A Skill referencing ~/.ssh or ~/.aws is directing the agent at credentials. Bundled scripts are covered by SKILL-009, so no line is counted twice.
 
 **Security impact.** Credentials can be read into context and then transmitted anywhere the agent can reach.
 
@@ -631,7 +631,7 @@ Skill text or a bundled script references a known credential location.
 
 Skill text contains language that would function as an injected instruction.
 
-**Detection rationale.** Skill bodies are loaded directly into the model's context. Static analysis cannot establish intent, so this reports potential injection only.
+**Detection rationale.** Skill bodies are loaded directly into the model's context. Static analysis cannot establish intent, so this reports potential injection only. Security-override and concealment directives are reported by SKILL-004, remote instructions by SKILL-005, and reads of known credential paths by SKILL-002 instead, so no line is counted twice.
 
 **Security impact.** An injected directive can redirect agent behaviour whenever the Skill activates.
 
@@ -727,7 +727,7 @@ Skill text or scripts contain commands classified as dangerous.
 
 A bundled script reads from a credential directory at execution time.
 
-**Detection rationale.** SKILL-002 covers references anywhere in the Skill; this narrows to executable scripts, where the access is an action rather than a mention.
+**Detection rationale.** SKILL-002 covers the Skill's text; this covers its executable scripts, where the access is an action rather than a mention.
 
 **Security impact.** Credentials are read by a subprocess outside the tool permission model.
 
@@ -782,7 +782,7 @@ The plugin's marketplace is not first-party and is not recorded in known_marketp
 
 A plugin-shipped hook runs a dangerous command or matches all tool calls.
 
-**Detection rationale.** Plugin hooks execute automatically on agent events, without appearing as tool calls the operator can approve.
+**Detection rationale.** Plugin hooks execute automatically on agent events, without appearing as tool calls the operator can approve. Hook files the HOOK-* checks evaluate are left to HOOK-003; this covers the rest of the plugin's hooks/ directory.
 
 **Security impact.** Gives the plugin an automatic, unattended execution path on every matching event.
 
@@ -965,7 +965,7 @@ The hook references a known credential location.
 
 The hook makes outbound network calls.
 
-**Detection rationale.** A hook with network access sees agent activity and can transmit it. Calls to loopback are treated as local tooling rather than egress.
+**Detection rationale.** A hook with network access sees agent activity and can transmit it. Calls to loopback are treated as local tooling rather than egress. The download in a download-and-execute is reported by HOOK-003, not again here.
 
 **Security impact.** Creates an automatic exfiltration channel for tool inputs and outputs.
 
@@ -1052,7 +1052,7 @@ The file tells the agent to run commands freely or without confirmation.
 
 The file contains language that would function as an injected instruction.
 
-**Detection rationale.** Static analysis cannot establish intent, so this reports potential injection. Matches inside code fences, blockquotes, or explicitly labelled examples are downgraded, because security documentation legitimately quotes these phrases.
+**Detection rationale.** Static analysis cannot establish intent, so this reports potential injection. Matches inside code fences, blockquotes, or explicitly labelled examples are downgraded, because security documentation legitimately quotes these phrases. Security-override directives are reported by INSTR-003 and remote instructions by INSTR-002 instead, so no line is counted twice.
 
 **Security impact.** An injected directive persists across every session that loads the file, making it far more durable than a single-turn injection.
 

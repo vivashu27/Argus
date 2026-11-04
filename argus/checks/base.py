@@ -11,7 +11,7 @@ A check must never raise to signal a problem: it returns an ``ERROR`` finding, o
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +75,7 @@ class Check(ABC):
             status=status,
             confidence=confidence,
             asset=asset,
-            evidence=evidence or [],
+            evidence=_merge_same_line(evidence or []),
             detail=detail,
             severity_override=severity,
             na_reason=na_reason,
@@ -174,3 +174,31 @@ class Check(ABC):
     def no_assets(self, kind: str) -> list[Finding]:
         """Uniform result when nothing of the relevant kind was discovered."""
         return [self.not_applicable("-", f"No {kind} discovered in this environment")]
+
+
+def _merge_same_line(evidence: list[Evidence]) -> list[Evidence]:
+    """One evidence item per line: several patterns matching the same line become one
+    entry listing every reason, instead of the line repeated once per pattern.
+
+    Items merge when they sit on the same line and one snippet contains the other (a
+    URL quoted from the line, a truncated copy of it). Key-located items never merge
+    by containment: ``Bash`` and ``Bash(*)`` are different rules on one JSON line.
+    """
+    merged: list[Evidence] = []
+    for item in evidence:
+        for index, previous in enumerate(merged):
+            if not item.line or (item.path, item.line, item.key) != (
+                previous.path, previous.line, previous.key
+            ):
+                continue
+            a, b = previous.snippet or "", item.snippet or ""
+            if a != b and (item.key or (a not in b and b not in a)):
+                continue
+            reason = previous.reason
+            if item.reason and item.reason not in reason:
+                reason = f"{reason}; {item.reason}" if reason else item.reason
+            merged[index] = replace(previous, snippet=max(a, b, key=len) or None, reason=reason)
+            break
+        else:
+            merged.append(item)
+    return merged

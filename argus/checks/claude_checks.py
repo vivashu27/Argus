@@ -543,7 +543,10 @@ class DangerousToolsWithoutApproval(Check):
         applies_to=frozenset({Target.CLAUDE_CODE}),
         rationale=(
             "An allow rule silences the approval prompt for that tool. Where the tool can "
-            "execute code or write files, that removes the human review step entirely."
+            "execute code or write files, that removes the human review step entirely. "
+            "Unscoped Bash, file and network grants are reported by CLAUDE-002, CLAUDE-003 "
+            "and CLAUDE-005; this covers dangerous tools none of them owns, so no grant is "
+            "counted twice."
         ),
         security_impact=(
             "Injected instructions can reach destructive tooling without the operator "
@@ -569,11 +572,13 @@ class DangerousToolsWithoutApproval(Check):
         for asset in assets:
             rules = _rules(asset)
             ask_tools = {r.split("(")[0].strip() for r in rules.ask}
+            grants = [
+                (rule, reason, severity)
+                for rule, reason, severity in rules.unrestricted_grants()
+                if rule.split("(")[0].strip() not in ask_tools | _OWNED_ELSEWHERE
+            ]
             evidence = []
-            for rule, reason, _severity in rules.unrestricted_grants():
-                tool = rule.split("(")[0].strip()
-                if tool in ask_tools:
-                    continue
+            for rule, reason, _severity in grants:
                 evidence.append(
                     self.evidence(
                         path=asset.path,
@@ -585,11 +590,7 @@ class DangerousToolsWithoutApproval(Check):
                 )
             if evidence:
                 worst = max(
-                    (
-                        Severity.parse(sev)
-                        for _r, _reason, sev in rules.unrestricted_grants()
-                        if _r.split("(")[0].strip() not in ask_tools
-                    ),
+                    (Severity.parse(sev) for _r, _reason, sev in grants),
                     key=lambda s: s.rank,
                     default=Severity.HIGH,
                 )
@@ -603,9 +604,21 @@ class DangerousToolsWithoutApproval(Check):
                 )
             else:
                 findings.append(
-                    self.ok(asset.asset_id, "No unapproved high-impact tool grants found.")
+                    self.ok(
+                        asset.asset_id,
+                        "No unapproved high-impact tool grants beyond those CLAUDE-002, "
+                        "CLAUDE-003 and CLAUDE-005 report.",
+                    )
                 )
         return findings
+
+
+#: Tools whose unscoped grant another check already fails; CLAUDE-007 leaves them alone.
+_OWNED_ELSEWHERE = (
+    {"Bash"}
+    | set(UnrestrictedFilesystemAccess.FILE_TOOLS)
+    | set(NetworkAccessUnrestricted.NETWORK_TOOLS)
+)
 
 
 @register

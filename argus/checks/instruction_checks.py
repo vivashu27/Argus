@@ -209,7 +209,9 @@ class InstructionPromptInjection(Check):
         rationale=(
             "Static analysis cannot establish intent, so this reports potential injection. "
             "Matches inside code fences, blockquotes, or explicitly labelled examples are "
-            "downgraded, because security documentation legitimately quotes these phrases."
+            "downgraded, because security documentation legitimately quotes these phrases. "
+            "Security-override directives are reported by INSTR-003 and remote "
+            "instructions by INSTR-002 instead, so no line is counted twice."
         ),
         security_impact=(
             "An injected directive persists across every session that loads the file, "
@@ -237,8 +239,12 @@ class InstructionPromptInjection(Check):
         findings: list[Finding] = []
         for asset in assets:
             matches = injection.scan_text(asset.text or "")
-            high = [m for m in matches if m.is_actionable and m.confidence == "HIGH"]
-            medium = [m for m in matches if m.is_actionable and m.confidence == "MEDIUM"]
+            # INSTR-002 and INSTR-003 report these families; counting them here too
+            # listed the same line under two checks and deducted twice.
+            claimed = (*InstructionUnrestrictedExecution.FAMILIES, "remote_instruction")
+            mine = [m for m in matches if m.is_actionable and m.family not in claimed]
+            high = [m for m in mine if m.confidence == "HIGH"]
+            medium = [m for m in mine if m.confidence == "MEDIUM"]
             low = [m for m in matches if not m.is_actionable]
 
             if high or medium:

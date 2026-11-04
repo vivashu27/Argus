@@ -375,7 +375,8 @@ class HookNetworkCommunication(Check):
         applies_to=HOOKS_ONLY,
         rationale=(
             "A hook with network access sees agent activity and can transmit it. Calls to "
-            "loopback are treated as local tooling rather than egress."
+            "loopback are treated as local tooling rather than egress. The download in a "
+            "download-and-execute is reported by HOOK-003, not again here."
         ),
         security_impact="Creates an automatic exfiltration channel for tool inputs and outputs.",
         remediation="Remove network calls from hooks, or restrict them to vetted internal endpoints.",
@@ -401,14 +402,25 @@ class HookNetworkCommunication(Check):
             text = _hook_text(asset)
             evidence = []
 
-            for match in commands.scan_text(text, include_tier_c=True):
+            matches = commands.scan_text(text, include_tier_c=True)
+            # HOOK-003 reports a download-and-execute; its download is not separate egress.
+            rce_lines = {
+                m.line for m in matches
+                if m.is_failing and m.threat.value == "REMOTE_CODE_EXECUTION"
+            }
+            for match in matches:
+                if match.line in rce_lines and match.threat.value == "NETWORK_ACCESS":
+                    continue
                 if match.threat.value in ("NETWORK_ACCESS", "DATA_EXFILTRATION"):
                     evidence.append(
                         self.evidence(path=asset.data.get("script_path") or asset.path,
                                       line=match.line, snippet=match.context,
                                       reason=match.description)
                     )
+            reported = {e.line for e in evidence} | rce_lines
             for lineno, line in enumerate(text.splitlines(), start=1):
+                if lineno in reported:
+                    continue
                 if any(marker in line for marker in self.NETWORK_MARKERS):
                     evidence.append(
                         self.evidence(path=asset.data.get("script_path") or asset.path,

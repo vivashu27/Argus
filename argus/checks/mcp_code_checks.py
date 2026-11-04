@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 
 from ..analysis import code_sinks, secrets
@@ -147,14 +148,22 @@ class ToolPoisoning(Check):
                 if not is_poisoned(matches):
                     continue
                 poisoned.append(tool.get("name", "?"))
+                on_line: dict[int | None, int] = {}
                 for match in matches[:3]:
+                    line = _description_line(tool, match.offset)
+                    reason = f"[tier {match.tier.value}] {match.description}"
+                    if line in on_line:  # a second pattern in the same sentence: one entry
+                        first = evidence[on_line[line]]
+                        evidence[on_line[line]] = replace(first, reason=f"{first.reason}; {reason}")
+                        continue
+                    on_line[line] = len(evidence)
                     evidence.append(
                         self.evidence(
                             path=tool.get("path"),
-                            line=_description_line(tool, match.offset),
+                            line=line,
                             key=f"tool.{tool.get('name')}.description",
                             snippet=match.excerpt,
-                            reason=f"[tier {match.tier.value}] {match.description}",
+                            reason=reason,
                         )
                     )
 
