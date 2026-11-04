@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "argus-auditor"
-version = "1.1.0"
+version = "1.2.0"
 description = "Argus — AI Agent Security Configuration Auditor"
 readme = "README.md"
 license = { file = "LICENSE" }

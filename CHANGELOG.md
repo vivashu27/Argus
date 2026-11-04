@@ -3,6 +3,41 @@
 All notable changes to Argus are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-11-04
+
+### Fixed — each problem is reported and scored once
+
+Findings were repeated in two ways, and every repeat also deducted from the score
+again. Scores rise for any environment that had them.
+
+- **One evidence entry per line.** A line matched by several patterns was listed once
+  per pattern inside the same finding. Same-line entries now merge into one that
+  keeps every reason. This applies to every check.
+- **Overlapping checks are now disjoint.** Where two checks reported the same issue
+  on the same line, the more specific check keeps it and the other defers:
+
+  | Issue | Reported by | No longer by |
+  |---|---|---|
+  | Security-override and concealment directives | SKILL-004 / INSTR-003 | SKILL-003 / INSTR-004 |
+  | Remote-instruction directives | SKILL-005 / INSTR-002 | SKILL-003 / INSTR-004 |
+  | Reading a known credential path in Skill text | SKILL-002 | SKILL-003 |
+  | Credential paths in bundled Skill scripts | SKILL-009 | SKILL-002 |
+  | A literal `curl … \| sh` in a Skill | SKILL-008 | SKILL-005 |
+  | The download in a hook's `curl … \| sh` | HOOK-003 | HOOK-005 |
+  | Plugin hook files the HOOK checks evaluate | HOOK-003 | PLUGIN-002 |
+  | Unscoped Bash, file and web tool grants | CLAUDE-002 / 003 / 005 | CLAUDE-007 |
+
+  Each deferring check states this in its rationale (`argus info <ID>`,
+  `docs/checks.md`). CLAUDE-007 still reports any dangerous tool no other check owns.
+
+### Changed — action may be needed
+
+- Triage entries for findings whose evidence changed are reported as stale, and the
+  finding reappears once to be triaged again.
+- Selecting a general check alone (for example `--check SKILL-003`) no longer shows
+  matches its specific sibling owns, consistent with the existing precedence of
+  MCP-006, SKILL-006, PLUGIN-005 and INSTR-001 over SECRET-*.
+
 ## [1.1.0] — 2026-11-04
 
 ### Security
@@ -55,5 +90,6 @@ All notable changes to Argus are recorded here. Versions follow
 Initial release: the AASB v1.0 benchmark, custom `.argus` rules, triage, LLM review,
 and terminal, JSON, YAML, CSV, Markdown, HTML and SARIF reports.
 
+[1.2.0]: https://github.com/vivashu27/Argus/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/vivashu27/Argus/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/vivashu27/Argus/releases/tag/v1.0.0
