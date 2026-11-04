@@ -14,7 +14,7 @@ from argus.core.models import Asset, Category, Severity, Status, Target
 from argus.rules import engine, load_rules
 from argus.rules.generate import generate_rule
 from argus.rules.loader import RuleError, parse_rule
-from argus.rules.providers import LLMError
+from argus.rules.providers import LLMError, build_provider
 
 RULE = """
 id: mcp-unpinned-npx
@@ -250,6 +250,43 @@ class TestGeneration:
         assert "detect npx without a version pin" in sent
         for leaked in ("/home/", ".ssh", ".claude.json", "mcpServers"):
             assert leaked not in sent, f"{leaked} reached the provider"
+
+    @pytest.mark.parametrize(
+        ("provider", "token_key"),
+        [("openai", "max_completion_tokens"), ("deepseek", "max_tokens")],
+    )
+    def test_token_limit_parameter_matches_provider(self, provider, token_key):
+        captured: list = []
+        generate_rule("x", provider=provider, api_key="k",
+                      transport=self._transport(RULE, captured))
+        assert {"max_tokens", "max_completion_tokens"} & captured[0].keys() == {token_key}
+
+    def test_rejected_temperature_is_retried_without_it_once(self):
+        sent: list = []
+
+        def strict_model(spec, raw):
+            body = json.loads(raw.decode())
+            sent.append(body)
+            if "temperature" in body:
+                raise LLMError("openai: HTTP 400 — Unsupported value: 'temperature' "
+                               "does not support 0 with this model.")
+            return {"model": "mock", "choices": [{"message": {"content": "ok"}}]}
+
+        provider = build_provider("openai", api_key="k", transport=strict_model)
+        assert provider.complete("s", "u").text == "ok"
+        assert provider.complete("s", "u").text == "ok"
+        assert ["temperature" in b for b in sent] == [True, False, False]
+
+    def test_unrelated_errors_are_not_retried(self):
+        calls: list = []
+
+        def down(spec, raw):
+            calls.append(raw)
+            raise LLMError("openai: HTTP 500 — upstream down")
+
+        with pytest.raises(LLMError, match="500"):
+            build_provider("openai", api_key="k", transport=down).complete("s", "u")
+        assert len(calls) == 1
 
     def test_provider_failure_surfaces(self):
         def boom(spec, raw):

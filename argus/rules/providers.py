@@ -119,6 +119,8 @@ class Provider:
     model: str
     timeout: int = 60
     max_output_tokens: int = 2000
+    #: Cleared after a model rejects temperature=0, so later calls skip the retry.
+    send_temperature: bool = True
     #: Injected in tests so the suite never touches the network.
     transport: object | None = field(default=None, repr=False)
 
@@ -134,7 +136,7 @@ class Provider:
                 "system": system,
                 "messages": [{"role": "user", "content": user}],
             }
-        return {
+        body: dict = {
             "model": self.model,
             "max_tokens": self.max_output_tokens,
             "temperature": 0,  # a security verdict should not vary run to run
@@ -143,6 +145,13 @@ class Provider:
                 {"role": "user", "content": user},
             ],
         }
+        if self.name == "openai":
+            # OpenAI deprecated max_tokens and newer models reject it; the
+            # OpenAI-compatible providers do not all accept the replacement.
+            body["max_completion_tokens"] = body.pop("max_tokens")
+        if not self.send_temperature:
+            del body["temperature"]
+        return body
 
     def _headers(self) -> dict[str, str]:
         common = {"content-type": "application/json", "user-agent": USER_AGENT}
@@ -182,6 +191,19 @@ class Provider:
 
     def complete(self, system: str, user: str) -> LLMResponse:
         """Issue one completion. Raises :class:`LLMError` on any failure."""
+        try:
+            return self._send(system, user)
+        except LLMError as exc:
+            message = str(exc).lower()
+            if not (self.send_temperature and "temperature" in message
+                    and "unsupported" in message):
+                raise
+        # Reasoning models (OpenAI o-series, gpt-5) accept only their default
+        # temperature; names change too often to list them, so ask once and adapt.
+        self.send_temperature = False
+        return self._send(system, user)
+
+    def _send(self, system: str, user: str) -> LLMResponse:
         raw = json.dumps(self._body(system, user)).encode("utf-8")
 
         if self.transport is not None:  # test seam
