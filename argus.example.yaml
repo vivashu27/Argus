@@ -1,4 +1,4 @@
-# Argus configuration — copy to argus.yaml in your project root.
+# Argus configuration — copy to argus.yaml in the directory you run argus from.
 #
 # Precedence: CLI flag > argus.yaml > built-in default.
 

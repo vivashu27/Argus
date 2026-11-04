@@ -395,7 +395,12 @@ def _collect(resolution: Resolution) -> None:
         if key in seen:
             continue
         seen.add(key)
-        if _is_test_file(path):
+        # Arguments can name any file (~/.kube/config); only source code is read,
+        # because whatever is read here is sent to a third party by `argus review`.
+        if path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        # Judge only the path inside the server: a project under ~/tests/ is not test code.
+        if _is_test_file(_inner_path(path, root)):
             continue
         try:
             text = read_text(path, MAX_FILE_BYTES)
@@ -407,6 +412,16 @@ def _collect(resolution: Resolution) -> None:
 
     for source in resolution.files:
         resolution.tools.extend(extract_tools(source.path, source.text))
+
+
+def _inner_path(path: Path, root: Path | None) -> Path:
+    """The part of ``path`` that belongs to the server, without its install location."""
+    if root:
+        try:
+            return path.relative_to(root)
+        except ValueError:
+            pass
+    return Path(path.name)
 
 
 def enrich(assets: list[Asset], context: DiscoveryContext) -> None:

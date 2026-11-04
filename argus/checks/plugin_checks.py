@@ -303,7 +303,7 @@ class PluginEmbeddedCredentials(Check):
                 # purpose — that is what they are testing. Reporting them as leaked
                 # credentials at CRITICAL was the single largest source of noise on
                 # a corpus of 83 public marketplace plugins.
-                if is_test_file(entry["path"]):
+                if is_test_file(entry["relative"]):  # not the install path
                     continue
                 # A hardening guide that shows `DB_PASSWORD = "hunter2"` under a
                 # "don't do this" heading is documenting the mistake, not making it.

@@ -131,6 +131,24 @@ class TestResolution:
         assert [t.name for t in result.tools] == ["go"]
 
 
+    def test_an_argument_naming_a_non_source_file_is_not_read(self, tmp_path):
+        """Audit regression: ``"args": ["~/.kube/config"]`` pulled the file into review."""
+        secret = tmp_path / "home" / ".kube" / "config"
+        secret.parent.mkdir(parents=True)
+        secret.write_text("client-key-data: c2VjcmV0\n")
+        result = mcp_code.resolve("node", [str(secret)], tmp_path, tmp_path, False)
+        mcp_code._collect(result)
+        assert not any("client-key-data" in f.text for f in result.files)
+
+    def test_a_parent_directory_named_tests_does_not_hide_the_server(self, tmp_path):
+        """Audit regression: a project under ~/tests/ had all its code skipped -> PASS."""
+        server = tmp_path / "tests" / "proj" / "srv" / "index.js"
+        server.parent.mkdir(parents=True)
+        server.write_text("// server\n")
+        result = mcp_code.resolve("node", [str(server)], tmp_path, tmp_path, False)
+        mcp_code._collect(result)
+        assert [f.path for f in result.files] == [server]
+
 # --- tool extraction --------------------------------------------------------------
 
 

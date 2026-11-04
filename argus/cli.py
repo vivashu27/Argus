@@ -126,13 +126,13 @@ def scan(
     fmt: list[str] | None = typer.Option(None, "--format", "-f", help=f"Output format, repeatable. One of: {', '.join(FORMATS)}."),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write reports to this directory."),
     path: Path | None = typer.Option(None, "--path", "-p", help="Project root to scan (default: current directory)."),
-    config_file: Path | None = typer.Option(None, "--config", help="Path to argus.yaml."),
+    config_file: Path | None = typer.Option(None, "--config", help="Path to argus.yaml (default: ./argus.yaml in the current directory, never the scanned --path)."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show all evidence, coverage, and score derivation."),
     exit_zero: bool = typer.Option(False, "--exit-zero", help="Always exit 0 when the scan itself completes."),
     no_user_scope: bool = typer.Option(False, "--no-user-scope", help="Scan only --path; skip user-level locations (~/.claude, Claude Desktop)."),
     rules: list[Path] | None = typer.Option(None, "--rules", "-r", help="Custom .argus rule file or directory. Repeatable."),
     rules_only: bool = typer.Option(False, "--rules-only", help="Run only custom .argus rules; skip the built-in AASB checks."),
-    triage: Path | None = typer.Option(None, "--triage", help="Triage file of findings judged false positives (default: .argus-triage.yaml if present)."),
+    triage: Path | None = typer.Option(None, "--triage", help="Triage file of findings judged false positives (default: ./.argus-triage.yaml in the current directory, never the scanned --path)."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured terminal output."),
 ) -> None:
     """Discover and audit AI-agent configuration in this environment."""
@@ -147,7 +147,9 @@ def scan(
 
     # --- configuration, CLI takes precedence (spec 9) ------------------------
     try:
-        config = load_config(find_config(project_root, config_file))
+        # The operator's directory, not --path: a scanned repo must not configure
+        # its own scan (exclude checks, zero weights, raise the exit-code gate).
+        config = load_config(find_config(Path.cwd(), config_file))
     except ArgusConfigError as exc:
         _fail(str(exc))
 
@@ -201,7 +203,7 @@ def scan(
         user_scope=not no_user_scope,
         rule_paths=rule_paths,
         rules_only=rules_only,
-        triage_path=_triage_path(triage, project_root),
+        triage_path=_triage_path(triage, Path.cwd()),  # same reason as argus.yaml
         verbose=verbose,
     )
 
@@ -670,15 +672,15 @@ def rule_test(
     )
 
 
-def _triage_path(explicit: Path | None, project_root: Path) -> Path | None:
-    """An explicit path is used as given; otherwise the project's file if it exists."""
+def _triage_path(explicit: Path | None, directory: Path) -> Path | None:
+    """An explicit path is used as given; otherwise the file in ``directory`` if it exists."""
     from .core.triage import DEFAULT_TRIAGE_FILE
 
     if explicit is not None:
         if not explicit.is_file():
             _fail(f"triage file not found: {explicit}")
         return explicit
-    default = project_root / DEFAULT_TRIAGE_FILE
+    default = directory / DEFAULT_TRIAGE_FILE
     return default if default.is_file() else None
 
 

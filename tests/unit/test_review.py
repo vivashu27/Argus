@@ -635,3 +635,23 @@ class TestParallelReview:
         provider = build_provider("openai", api_key="k", transport=transport)
         reviews = run(self._payloads(3), provider, workers=3)
         assert ["429" in (r.error or "") for r in reviews] == [False, True, False]
+
+
+class TestNothingUnscannedLeavesTheMachine:
+    """Audit regressions: material the secret scanner cannot see must not be sent."""
+
+    def test_private_key_body_is_redacted_not_just_its_header(self):
+        from tests.conftest import FAKE_PRIVATE_KEY
+
+        body = build(_asset(text=f"# Notes\n{FAKE_PRIVATE_KEY}\nafter the key\n")).body
+        assert "testkeymaterial" not in body
+        assert "END RSA PRIVATE KEY" not in body
+        assert "after the key" in body  # redaction stops at the END line
+
+    def test_secret_on_a_line_too_long_to_scan_is_not_sent(self):
+        from tests.conftest import FAKE_AWS_KEY
+
+        line = "x" * 4100 + f' key="{FAKE_AWS_KEY}"'
+        payload = build(_asset(text=f"# Notes\n{line}\nshort line\n"))
+        assert FAKE_AWS_KEY not in payload.body
+        assert "short line" in payload.body
