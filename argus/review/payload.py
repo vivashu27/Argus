@@ -226,24 +226,44 @@ def _redact(text: str) -> tuple[str, list[str]]:
     the text leaves the machine, and keeping one implementation means the two cannot
     drift apart.
     """
-    matches = secrets.scan_text(text, max_findings=200)
-    if not matches:
-        return text, []
-
-    # Whole offending lines are replaced. Surgical replacement of just the value
-    # would need the raw secret, which the scanner deliberately never returns.
-    #
     # Split on "\n" rather than with splitlines(): the latter also breaks on \r,
     # \x0b, \x0c, \x85, \u2028 and \u2029, so rejoining with "\n" turns each of
     # those into a real newline and shifts every line number after it. The segment
     # map is built before this runs, so the result would be a confidently wrong
     # file:line on any asset containing one — and read_text does not translate them.
     lines = text.split("\n")
+    removed: list[str] = []
+
+    # The scanner skips overlong lines, so neither it nor the fail-closed re-check
+    # would see a key inside one. Minified bundles are exactly where keys hide.
+    for index, line in enumerate(lines):
+        if len(line) > secrets.MAX_SCAN_LINE:
+            lines[index] = "[REMOVED BY ARGUS — line too long to check for credentials]"
+            removed.append("Line too long to check for credentials")
+
+    text = "\n".join(lines)
+    matches = secrets.scan_text(text, max_findings=200)
+    if not matches:
+        return text, removed
+
+    # Whole offending lines are replaced. Surgical replacement of just the value
+    # would need the raw secret, which the scanner deliberately never returns.
     for match in matches:
         index = match.line - 1
-        if 0 <= index < len(lines):
-            lines[index] = "[REDACTED BY ARGUS — line contained a credential]"
-    return "\n".join(lines), [m.description for m in matches]
+        if not 0 <= index < len(lines):
+            continue
+        lines[index] = "[REDACTED BY ARGUS — line contained a credential]"
+        if match.pattern_id == "private-key-block":
+            # The pattern matches only the BEGIN line; the key material follows it
+            # and matches nothing. Redact through END, or to the end if it is missing.
+            index += 1
+            while index < len(lines):
+                ended = lines[index].lstrip().startswith("-----END")
+                lines[index] = "[REDACTED BY ARGUS — line contained a credential]"
+                index += 1
+                if ended:
+                    break
+    return "\n".join(lines), removed + [m.description for m in matches]
 
 
 def _truncate(text: str, limit: int) -> str:

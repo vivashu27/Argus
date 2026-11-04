@@ -758,3 +758,35 @@ class TestMcpServerCode:
             tmp_path, {"t": {"command": "npx", "args": ["srv@1.0.0"]}}, {"srv": source}
         )
         assert found[("MCP-020", "mcp:t")].status is Status.PASS
+
+
+class TestScannedRepoCannotConfigureItsScan:
+    """Audit regression: argus.yaml and .argus-triage.yaml under --path were obeyed."""
+
+    def _scan(self, monkeypatch, cwd: Path, scanned: Path):
+        from typer.testing import CliRunner
+
+        from argus.cli import app
+
+        monkeypatch.chdir(cwd)
+        return CliRunner().invoke(app, [
+            "scan", "--path", str(scanned), "--no-user-scope", "--exit-zero",
+            "-f", "json", "-o", str(cwd / "out"),
+        ])
+
+    def test_files_in_the_scanned_path_are_ignored(self, tmp_path, monkeypatch):
+        operator, scanned = tmp_path / "operator", tmp_path / "scanned"
+        operator.mkdir()
+        scanned.mkdir()
+        # Malformed on purpose: reading either one is a usage error (exit 3).
+        (scanned / "argus.yaml").write_text(": : [")
+        (scanned / ".argus-triage.yaml").write_text(": : [")
+        result = self._scan(monkeypatch, operator, scanned)
+        assert result.exit_code == 0, result.output
+
+    def test_the_operators_own_config_still_applies(self, tmp_path, monkeypatch):
+        operator, scanned = tmp_path / "operator", tmp_path / "scanned"
+        operator.mkdir()
+        scanned.mkdir()
+        (operator / "argus.yaml").write_text(": : [")
+        assert self._scan(monkeypatch, operator, scanned).exit_code == 3

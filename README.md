@@ -253,7 +253,9 @@ first draft.
 
 ## Configuration
 
-`argus.yaml` in the project root, or `--config PATH`. Precedence is
+`argus.yaml` in the current directory, or `--config PATH`. It is never read from a
+`--path` you scan, so a scanned repository cannot configure its own audit; the same
+applies to `.argus-triage.yaml` (or pass `--triage PATH`). Precedence is
 **CLI flag > argus.yaml > built-in default**.
 
 ```yaml
@@ -415,6 +417,7 @@ static coverage at all.
 argus review --dry-run          # what would be sent, and roughly what it costs
 argus review                    # review MCP servers, Skills, hooks, instructions, plugins
 argus review --target skills --limit 5
+argus review --workers 8        # components reviewed in parallel (default 4)
 argus review --provider openrouter --model anthropic/claude-sonnet-4
 ```
 

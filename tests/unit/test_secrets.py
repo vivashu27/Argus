@@ -144,6 +144,16 @@ class TestLargeInput:
         """A single enormous line must not become an entropy-scanning hot loop."""
         assert secrets.scan_text("x" * 5000 + f' api_key="{FAKE_AWS_KEY}"') == []
 
+    def test_whole_text_prefilter_keeps_line_numbers_and_full_keys(self):
+        text = "\n".join(
+            ["# notes", "plain prose", f"token: {FAKE_GITHUB_TOKEN}", "more prose",
+             'MY_API_SECRET = "xQ7vNp2LmZ4rTy8WbK3jFh6Ds9Gc1Aa5"']
+        )
+        found = {m.pattern_id: m for m in secrets.scan_text(text)}
+        assert found["github-token"].line == 3
+        assert found["generic-secret"].line == 5
+        assert found["generic-secret"].key == "MY_API_SECRET"  # whole key, not a suffix
+
     def test_respects_max_findings(self):
         text = "\n".join(f'api_key_{i} = "{FAKE_AWS_KEY}"' for i in range(100))
         assert len(secrets.scan_text(text, max_findings=10)) <= 10
