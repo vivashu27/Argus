@@ -3,6 +3,17 @@
 All notable changes to Argus are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-11-05
+
+### Fixed — a single downloaded Skill is found
+
+- **`--path` may point at one Skill.** A folder with `SKILL.md` at its top (a skill
+  repo you cloned) is now scanned as a Skill. Before, only `<path>/<name>/SKILL.md`
+  was found, so a lone Skill gave "no agent assets were found".
+- **`--path` may point at a file.** `--path ./skill/SKILL.md` scans the folder the
+  file is in, for both `scan` and `review`.
+- The "nothing found" message and the README list every place a Skill is looked for.
+
 ## [1.2.0] — 2026-11-04
 
 ### Fixed — each problem is reported and scored once
@@ -90,6 +101,7 @@ again. Scores rise for any environment that had them.
 Initial release: the AASB v1.0 benchmark, custom `.argus` rules, triage, LLM review,
 and terminal, JSON, YAML, CSV, Markdown, HTML and SARIF reports.
 
+[1.2.1]: https://github.com/vivashu27/Argus/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/vivashu27/Argus/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/vivashu27/Argus/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/vivashu27/Argus/releases/tag/v1.0.0
