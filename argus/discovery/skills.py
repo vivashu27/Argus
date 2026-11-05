@@ -67,43 +67,46 @@ def _discover_dir(root: Path, scope: str, context: DiscoveryContext) -> list[Ass
     for skill_dir in entries:
         if not skill_dir.is_dir() or skill_dir.is_symlink():
             continue
-        skill_file = skill_dir / "SKILL.md"
-        if not skill_file.is_file():
-            continue
-        if not is_readable(skill_file):
-            context.record_unreadable(skill_file, "permission denied")
-            continue
-        try:
-            text = read_text(skill_file)
-        except (OSError, ValueError, ArgusError) as exc:
-            context.record_unreadable(skill_file, str(exc))
-            continue
-
-        frontmatter, body, body_offset = parse_frontmatter(text)
-        name = str(frontmatter.get("name") or skill_dir.name)
-        scripts = _collect_scripts(skill_dir)
-
-        assets.append(
-            Asset(
-                asset_id=f"skill:{name}",
-                target=Target.SKILLS,
-                path=skill_file,
-                data={
-                    "name": name,
-                    "scope": scope,
-                    "directory": str(skill_dir),
-                    "frontmatter": frontmatter,
-                    "allowed_tools": _allowed_tools(frontmatter),
-                    "body": body,
-                    "body_offset": body_offset,
-                    "scripts": scripts,
-                },
-                text=text,
-                text_is_verbatim=True,
-                source=str(skill_file),
-            )
-        )
+        asset = _discover_skill(skill_dir, scope, context)
+        if asset:
+            assets.append(asset)
     return assets
+
+
+def _discover_skill(skill_dir: Path, scope: str, context: DiscoveryContext) -> Asset | None:
+    """The Skill in ``skill_dir``, or None when it has no readable ``SKILL.md``."""
+    skill_file = skill_dir / "SKILL.md"
+    if not skill_file.is_file():
+        return None
+    if not is_readable(skill_file):
+        context.record_unreadable(skill_file, "permission denied")
+        return None
+    try:
+        text = read_text(skill_file)
+    except (OSError, ValueError, ArgusError) as exc:
+        context.record_unreadable(skill_file, str(exc))
+        return None
+
+    frontmatter, body, body_offset = parse_frontmatter(text)
+    name = str(frontmatter.get("name") or skill_dir.name)
+    return Asset(
+        asset_id=f"skill:{name}",
+        target=Target.SKILLS,
+        path=skill_file,
+        data={
+            "name": name,
+            "scope": scope,
+            "directory": str(skill_dir),
+            "frontmatter": frontmatter,
+            "allowed_tools": _allowed_tools(frontmatter),
+            "body": body,
+            "body_offset": body_offset,
+            "scripts": _collect_scripts(skill_dir),
+        },
+        text=text,
+        text_is_verbatim=True,
+        source=str(skill_file),
+    )
 
 
 def _allowed_tools(frontmatter: dict[str, Any]) -> list[str]:
@@ -133,9 +136,12 @@ def discover(context: DiscoveryContext) -> list[Asset]:
     assets.extend(_discover_dir(project_skills, "project", context))
 
     seen = {a.data.get("directory") for a in assets}
+    # The scan root may itself be one Skill: a downloaded skill repo has SKILL.md at its top.
+    found = [_discover_skill(context.project_root, "path", context)]
     for root, scope in ((context.project_root, "path"), (context.project_root / "skills", "path")):
-        for asset in _discover_dir(root, scope, context):
-            if asset.data.get("directory") not in seen:
-                seen.add(asset.data.get("directory"))
-                assets.append(asset)
+        found.extend(_discover_dir(root, scope, context))
+    for asset in found:
+        if asset and asset.data.get("directory") not in seen:
+            seen.add(asset.data.get("directory"))
+            assets.append(asset)
     return assets

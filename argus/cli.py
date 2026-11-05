@@ -144,6 +144,8 @@ def scan(
     project_root = (path or Path.cwd()).expanduser()
     if not project_root.exists():
         _fail(f"path does not exist: {project_root}")
+    if project_root.is_file():  # --path ./skill/SKILL.md means the folder it sits in
+        project_root = project_root.parent
 
     # --- configuration, CLI takes precedence (spec 9) ------------------------
     try:
@@ -466,6 +468,8 @@ def review(
     project_root = (path or Path.cwd()).expanduser()
     if not project_root.exists():
         _fail(f"path does not exist: {project_root}")
+    if project_root.is_file():  # --path ./skill/SKILL.md means the folder it sits in
+        project_root = project_root.parent
 
     targets = _parse_enum_list(target, Target.parse, "target")
     payloads, refused = prepare(

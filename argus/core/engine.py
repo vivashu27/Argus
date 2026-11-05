@@ -124,8 +124,9 @@ def run_scan(options: ScanOptions) -> ScanReport:
     if not options.user_scope and not assets:
         discovery_context.record_error(
             f"no agent assets were found under {options.project_root} with user scope "
-            "disabled. Check --path: Skills are discovered as <path>/<name>/SKILL.md, "
-            "so point at the directory that contains skill folders, not at one of them."
+            "disabled. Check --path: a Skill is found at <path>/SKILL.md, "
+            "<path>/<name>/SKILL.md, <path>/skills/<name>/SKILL.md or "
+            "<path>/.claude/skills/<name>/SKILL.md."
         )
 
     # 4-5. Static analysis and security checks. Discovery still runs in full under

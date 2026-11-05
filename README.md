@@ -134,10 +134,15 @@ argus scan --exclude CLAUDE-005   # exclusion always wins over inclusion
 argus scan --path ./proj --no-user-scope   # only --path; skip ~/.claude entirely
 ```
 
-**Where Skills are looked for.** Discovery expects `<path>/<name>/SKILL.md`, so
-`--path` should name the directory *containing* skill folders, not a skill folder
-itself. Pointing at the skill directly finds nothing — Argus now says so rather than
-reporting a clean scan. `<path>/.claude/skills/` and `<path>/skills/` also work.
+**Where Skills are looked for.** `--path` can name a single Skill (a folder with
+`SKILL.md` at its top, as a downloaded skill repository has, or the `SKILL.md` file
+itself) or a folder of Skills: `<path>/<name>/SKILL.md`, `<path>/skills/<name>/` and
+`<path>/.claude/skills/<name>/` are all found. If nothing is found, Argus says so
+rather than reporting a clean scan.
+
+```bash
+argus scan --path ./downloaded-skill --no-user-scope   # vet a Skill before installing it
+```
 
 ### Severity vs exit codes
 
