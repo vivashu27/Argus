@@ -5,6 +5,8 @@ Skill bodies and any bundled scripts are analyzed as text. Skills are never invo
 
 from __future__ import annotations
 
+import re
+
 from ..analysis import commands, injection, secrets
 from ..analysis.paths import touches_sensitive
 from ..core.models import (
@@ -21,6 +23,20 @@ from ..core.registry import register
 from .base import Check, CheckContext
 
 SKILLS_ONLY = frozenset({Target.SKILLS})
+
+#: HTTP clients called from Python or JavaScript. The command rules only see shell tools.
+NETWORK_CALL = re.compile(
+    r"\b(?:requests|httpx|aiohttp|axios)\.(?:get|post|put|patch|delete|request|Session|"
+    r"AsyncClient|ClientSession)\b|\burllib\.request\b|\burlopen\(|\bhttp\.client\b|"
+    r"\bhttps?\.(?:request|get)\(|(?<![.\w])fetch\(|\bsocket\.create_connection\("
+)
+
+#: Reading the whole environment rather than a named variable. Copies (os.environ.copy(),
+#: {...process.env}) are left out: passing the environment to a subprocess is routine.
+ENV_ENUMERATION = re.compile(
+    r"\bos\.environ\.(?:items|keys|values)\(\)|\bfor\s+\w+\s+in\s+os\.environ\b|"
+    r"\bObject\.(?:keys|entries|values)\(process\.env\)|\bJSON\.stringify\(process\.env\)"
+)
 
 
 def _skills(context: CheckContext) -> list[Asset]:
@@ -206,10 +222,8 @@ class SkillPromptInjection(Check):
 
         findings: list[Finding] = []
         for asset in assets:
-            matches = injection.scan_text(
-                asset.data.get("body") or asset.text or "",
-                line_offset=int(asset.data.get("body_offset") or 0),
-            )
+            # The whole file, frontmatter included: its fields load into the model's context too.
+            matches = injection.scan_text(asset.text or "")
             # SKILL-004 and SKILL-005 report these families; counting them here too
             # listed the same line under two checks and deducted twice.
             claimed = (*SkillSecurityOverride.FAMILIES, "remote_instruction")
@@ -299,10 +313,7 @@ class SkillSecurityOverride(Check):
         for asset in assets:
             matches = [
                 m
-                for m in injection.scan_text(
-                    asset.data.get("body") or asset.text or "",
-                    line_offset=int(asset.data.get("body_offset") or 0),
-                )
+                for m in injection.scan_text(asset.text or "")
                 if m.family in self.FAMILIES and m.is_actionable
             ]
             if matches:
@@ -355,15 +366,13 @@ class SkillExternalInstructions(Check):
 
         findings: list[Finding] = []
         for asset in assets:
-            text = asset.data.get("body") or asset.text or ""
+            text = asset.text or ""
             command_lines = {
                 m.line for m in commands.scan_text(asset.text or "") if m.is_failing
             }
             remote = [
                 m
-                for m in injection.scan_text(
-                    text, line_offset=int(asset.data.get("body_offset") or 0)
-                )
+                for m in injection.scan_text(text)
                 if m.family == "remote_instruction" and m.is_actionable
                 # A literal `curl | sh` is SKILL-008's dangerous command on the same line.
                 and not (m.pattern_id == "url-then-execute" and m.line in command_lines)
@@ -501,6 +510,12 @@ class SkillNetworkAccess(Check):
                             self.evidence(path=script["path"], line=match.line,
                                           snippet=match.context, reason=match.description)
                         )
+                for lineno, line in enumerate(script["text"].splitlines(), start=1):
+                    if NETWORK_CALL.search(line):
+                        evidence.append(
+                            self.evidence(path=script["path"], line=lineno,
+                                          snippet=line.strip()[:200], reason="HTTP client call")
+                        )
             if evidence and not declared_network:
                 findings.append(
                     self.warn(asset.asset_id, "Bundled scripts perform undeclared network access.",
@@ -589,7 +604,9 @@ class SkillCredentialDirectoryAccess(Check):
         applies_to=SKILLS_ONLY,
         rationale=(
             "SKILL-002 covers the Skill's text; this covers its executable scripts, where "
-            "the access is an action rather than a mention."
+            "the access is an action rather than a mention. Environment variables hold "
+            "credentials too, so a script that reads all of them and also sends data over "
+            "the network is reported here."
         ),
         security_impact="Credentials are read by a subprocess outside the tool permission model.",
         remediation="Remove credential access from bundled scripts.",
@@ -616,8 +633,17 @@ class SkillCredentialDirectoryAccess(Check):
                 continue
             evidence = []
             for script in scripts:
+                sends = bool(NETWORK_CALL.search(script["text"])) or any(
+                    m.threat.value in ("NETWORK_ACCESS", "DATA_EXFILTRATION")
+                    for m in commands.scan_text(script["text"], include_tier_c=True)
+                )
                 for lineno, line in enumerate(script["text"].splitlines(), start=1):
                     hit, description = touches_sensitive(line)
+                    if not hit and sends and ENV_ENUMERATION.search(line):
+                        hit, description = True, (
+                            "Reads every environment variable in a script that also sends data "
+                            "over the network"
+                        )
                     if hit:
                         evidence.append(
                             self.evidence(path=script["path"], line=lineno,

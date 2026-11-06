@@ -68,12 +68,6 @@ class Payload:
     #: Where each part of the body came from, so a quoted finding can name a file
     #: and a line instead of pointing vaguely at the component.
     segments: list[Segment] = field(default_factory=list)
-    #: The asset's file as it is on disk, where one exists byte for byte. Used to
-    #: resolve quotes that land in a header Argus composed: a skill's declared
-    #: description is real text at a real line, even though the payload presents it
-    #: as a summary line rather than as part of the body.
-    source_text: str | None = None
-    source_path: Path | None = None
     #: Lazily built in _segment_texts. Each verdict resolves a quote two or three
     #: times, so recomputing the split per call meant ~10 passes over the body per
     #: asset for no gain.
@@ -133,25 +127,8 @@ class Payload:
         if segment.path is None:
             return None, None
         if segment.source_line is None:
-            return segment.path, self._line_in_source(quote, segment)
+            return segment.path, None
         return segment.path, segment.source_line + line_within
-
-    def _line_in_source(self, quote: str, segment: Segment) -> int | None:
-        """Find a quote directly in the asset's own file.
-
-        The fallback for text that reaches the payload through a header Argus
-        composed: a skill's ``description:`` is summarised into that header, but it
-        is also a real line of a real file.
-
-        Guarded on the segment naming the same file the verbatim text came from.
-        Without that, a quote from a composed separator would be looked up in an
-        unrelated file and could match coincidentally, producing a confident
-        citation to a line that has nothing to do with the finding.
-        """
-        if not self.source_text or segment.path != self.source_path:
-            return None
-        offset = _find_normalised(self.source_text, normalise(quote))
-        return None if offset < 0 else self.source_text.count("\n", 0, offset) + 1
 
 
 def normalise(quote: str) -> str:
@@ -278,27 +255,21 @@ def _describe(asset: Asset) -> tuple[str, _Body]:
     body = _Body()
 
     if asset.target is Target.SKILLS:
-        frontmatter = data.get("frontmatter") or {}
-        tools = data.get("allowed_tools") or []
-        header = (
-            f"name: {data.get('name', '')}\n"
-            f"description: {frontmatter.get('description', '')}\n"
-            f"allowed-tools: {', '.join(str(t) for t in tools) or '(none declared)'}\n"
-        )
-        scripts = data.get("scripts") or []
-        if scripts:
-            header += f"bundled scripts: {', '.join(str(s) for s in scripts[:12])}\n"
-        body.add(header, path=asset.path)
-        body.add("\n--- SKILL.md body ---")
-        # body_offset counts the frontmatter lines, so the body's first line is the
-        # one after it. Without this every skill finding would point at line 1.
+        # The whole SKILL.md: every frontmatter field reaches the model's context, so
+        # sending only name and description hid injections in the other fields.
         body.add(
-            str(data.get("body") or ""),
+            asset.text or "",
             path=asset.path,
-            source_line=(int(data.get("body_offset") or 0) + 1)
-            if asset.text_is_verbatim
-            else None,
+            source_line=1 if asset.text_is_verbatim else None,
         )
+        for script in (data.get("scripts") or [])[:MAX_FILES]:
+            body.add(f"\n--- {script.get('name', '')} ---")
+            raw = script.get("path")
+            body.add(
+                _truncate(str(script.get("text") or ""), MAX_FILE_CHARS),
+                path=Path(raw) if raw else None,
+                source_line=1,
+            )
         return "Claude Skill", body
 
     if asset.target is Target.INSTRUCTIONS:
@@ -392,13 +363,4 @@ def build(asset: Asset) -> Payload:
         body=redacted,
         redactions=removed,
         segments=composed.segments,
-        # Retained only for SKILLS, the one target whose composed header summarises
-        # real lines of the file. Holding a second copy of every instruction file
-        # and settings file for a fallback that never fires is pure memory.
-        source_text=(
-            asset.text
-            if asset.target is Target.SKILLS and asset.text_is_verbatim
-            else None
-        ),
-        source_path=asset.path,
     )

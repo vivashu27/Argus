@@ -182,6 +182,12 @@ RULES: tuple[_Rule, ...] = (
               rf"|(?<![{_PICTOGRAPHIC}])‍"
           ),
           "Strip the characters. Invisible text hides instructions from human review but not from the model."),
+    # Cyrillic а/е/о/р/с/х render exactly like Latin letters, so one inside a Latin
+    # word makes a name that reads as another. Real text keeps the scripts in separate words.
+    _Rule("mixed-script", "Word mixing Latin and Cyrillic letters (look-alike characters)",
+          "deception", "MEDIUM",
+          re.compile(r"\b(?=\w*[A-Za-z])(?=\w*[\u0400-\u04ff])\w+"),
+          "Retype the word in one script. A look-alike name can impersonate another skill or tool."),
 )
 
 #: Contexts where a matched phrase is probably being described, not issued.

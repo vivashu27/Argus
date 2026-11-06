@@ -158,18 +158,21 @@ def parse_response(text: str, payload: Payload) -> tuple[list[Verdict], list[str
 def review(payload: Payload, provider: Provider) -> Review:
     """Review one prepared payload. Never raises for a provider failure."""
     result = Review(asset_id=payload.asset_id, provider=provider.name)
-    try:
-        response = provider.complete(
-            SYSTEM_PROMPT, user_prompt(payload.kind, payload.asset_id, payload.body)
-        )
-    except LLMError as exc:
-        result.error = str(exc)
-        return result
-
-    result.model = response.model
-    result.verdicts, result.discarded = parse_response(response.text, payload)
-    if not result.verdicts:
-        result.error = "model returned no usable verdict"
+    # One retry: models intermittently return malformed or empty JSON for the same
+    # input, and one bad reply otherwise left every criterion unanswered.
+    for _attempt in range(2):
+        try:
+            response = provider.complete(
+                SYSTEM_PROMPT, user_prompt(payload.kind, payload.asset_id, payload.body)
+            )
+        except LLMError as exc:
+            result.error = str(exc)
+            return result
+        result.model = response.model
+        result.verdicts, result.discarded = parse_response(response.text, payload)
+        if result.verdicts:
+            return result
+    result.error = "model returned no usable verdict"
     return result
 
 

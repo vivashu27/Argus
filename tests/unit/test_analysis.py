@@ -390,3 +390,16 @@ class TestCorpusFalsePositives:
 
     def test_public_bare_addresses_are_still_untrusted(self):
         assert injection.is_suspicious_host("45.32.11.9")
+
+
+class TestMixedScript:
+    def test_a_cyrillic_letter_inside_a_latin_name_is_flagged(self):
+        matches = injection.scan_text('name: "reаd_data"\n')
+        assert [m.pattern_id for m in matches] == ["mixed-script"]
+
+    @pytest.mark.parametrize("text", [
+        "Привет means hello in Russian.\n",  # each word in one script
+        "A naïve café résumé.\n",            # accented Latin is still Latin
+    ])
+    def test_separate_scripts_are_not_flagged(self, text):
+        assert not [m for m in injection.scan_text(text) if m.pattern_id == "mixed-script"]

@@ -727,7 +727,7 @@ Skill text or scripts contain commands classified as dangerous.
 
 A bundled script reads from a credential directory at execution time.
 
-**Detection rationale.** SKILL-002 covers the Skill's text; this covers its executable scripts, where the access is an action rather than a mention.
+**Detection rationale.** SKILL-002 covers the Skill's text; this covers its executable scripts, where the access is an action rather than a mention. Environment variables hold credentials too, so a script that reads all of them and also sends data over the network is reported here.
 
 **Security impact.** Credentials are read by a subprocess outside the tool permission model.
 
