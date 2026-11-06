@@ -3,6 +3,32 @@
 All notable changes to Argus are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-11-06
+
+Gaps found by running NVIDIA SkillSpector's malicious test skills through Argus:
+every one scored 100/100. Scores drop for Skills that have these problems.
+
+### Added
+
+- **SKILL-007** recognises HTTP calls made from Python or JavaScript (`requests`,
+  `httpx`, `urllib`, `fetch`, `axios`), not only `curl` and `wget`.
+- **SKILL-009** fails a bundled script that reads every environment variable and
+  also sends data over the network. Copying the environment for a subprocess, or
+  reading it with nothing sent anywhere, still passes.
+- **Look-alike characters.** A word mixing Latin and Cyrillic letters (`reаd_data`)
+  is reported by SKILL-003 and INSTR-004.
+
+### Fixed
+
+- **SKILL-003, 004 and 005 now scan the frontmatter.** Only the body after the YAML
+  header was checked, so an injection in `description:`, `parameters:` or any other
+  field went unreported, although every field is loaded into the model's context.
+- **`review` sends the whole SKILL.md.** Only `name` and `description` were sent, so
+  the model never saw the other frontmatter fields. Bundled scripts are now sent as
+  their own sections, so a quote from one is cited at its real file and line.
+- **`review` retries once on an unusable reply.** Models intermittently return
+  malformed or empty JSON, and one bad reply marked every criterion MANUAL.
+
 ## [1.2.1] — 2026-11-05
 
 ### Fixed — a single downloaded Skill is found
@@ -101,6 +127,7 @@ again. Scores rise for any environment that had them.
 Initial release: the AASB v1.0 benchmark, custom `.argus` rules, triage, LLM review,
 and terminal, JSON, YAML, CSV, Markdown, HTML and SARIF reports.
 
+[1.3.0]: https://github.com/vivashu27/Argus/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/vivashu27/Argus/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/vivashu27/Argus/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/vivashu27/Argus/compare/v1.0.0...v1.1.0
