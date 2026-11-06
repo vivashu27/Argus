@@ -505,8 +505,8 @@ class TestNoDuplicateReporting:
         assert [e.snippet for e in approval.evidence] == ["Task"]
 
 
-class TestSkillSpectorGaps:
-    """Samples from NVIDIA/SkillSpector's fixtures that Argus scored 100/100."""
+class TestMaliciousSkillSamples:
+    """Malicious Skill samples that previously scored 100/100."""
 
     def test_injection_in_a_frontmatter_field_is_reported(self, project, home):
         text = (

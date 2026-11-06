@@ -5,8 +5,9 @@ All notable changes to Argus are recorded here. Versions follow
 
 ## [1.3.0] — 2026-11-06
 
-Gaps found by running NVIDIA SkillSpector's malicious test skills through Argus:
-every one scored 100/100. Scores drop for Skills that have these problems.
+Detection gaps in Skills: malicious test Skills that hid instructions in their
+frontmatter or harvested credentials from scripts scored 100/100. Scores drop for
+Skills that have these problems.
 
 ### Added
 
