@@ -284,6 +284,11 @@ class Finding:
         return self.meta.advisory
 
     @property
+    def is_issue(self) -> bool:
+        """A FAIL or WARN: something a report lists as a finding, whatever its triage."""
+        return self.status in (Status.FAIL, Status.WARN)
+
+    @property
     def is_open(self) -> bool:
         """True when this finding gates the exit code (spec 3.5): FAIL, not accepted."""
         return (
@@ -295,7 +300,7 @@ class Finding:
 
     @property
     def display_status(self) -> str:
-        if self.meta.advisory and self.status in (Status.FAIL, Status.WARN):
+        if self.meta.advisory and self.is_issue:
             return f"{self.status.value} — ADVISORY"
         if self.suppressed:
             return f"{self.status.value} — FALSE POSITIVE"

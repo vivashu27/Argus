@@ -29,7 +29,7 @@ from .models import (
     Status,
     Target,
 )
-from .registry import select
+from .registry import CheckClass, all_checks, selection
 from .scoring import Summary, score_findings
 
 
@@ -138,44 +138,22 @@ def run_scan(options: ScanOptions) -> ScanReport:
     if categories is None and not options.reviews:
         categories = {c for c in Category if c is not Category.DYNAMIC}
 
-    checks = (
-        []
-        if options.rules_only
-        else select(
-            targets=options.targets,
-            categories=categories,
-            include_ids=options.include_ids,
-            exclude_ids=options.exclude_ids,
-            level=options.level,
-        )
+    wanted = selection(
+        targets=options.targets,
+        categories=categories,
+        include_ids=options.include_ids,
+        exclude_ids=options.exclude_ids,
+        level=options.level,
     )
-    context = check_base.CheckContext(
-        assets=assets,
-        project_root=options.project_root,
-        home=home,
-        options={"verbose": options.verbose, "reviews": list(options.reviews)},
+    checks: list[CheckClass] = (
+        [] if options.rules_only else [cls() for cls in all_checks() if wanted(cls.meta)]
     )
-
-    findings: list[Finding] = []
-    for check_cls in checks:
-        instance = check_cls()
-        try:
-            produced = instance.run(context)
-        except Exception as exc:  # a hostile asset must not kill the scan
-            produced = [
-                Finding(
-                    meta=check_cls.meta,
-                    status=Status.ERROR,
-                    asset="-",
-                    detail=f"Check raised {type(exc).__name__}: {exc}",
-                )
-            ]
-        findings.extend(produced or [])
 
     # Custom .argus rules run after the built-in checks. They are deterministic,
-    # so their findings are real: they score and gate like any other check.
+    # so their findings are real: they are selected, scored and gated like any
+    # other check.
     if options.rule_paths:
-        from ..rules import load_rules, run_rules
+        from ..rules import RuleCheck, load_rules
 
         rules, rule_errors = load_rules(options.rule_paths)
         for message in rule_errors:
@@ -191,19 +169,29 @@ def run_scan(options: ScanOptions) -> ScanReport:
                     f"not exist on target '{rule.target.value}' — it can never match"
                 )
 
-        # Rules are checks, so the same selection flags apply to them. Without this
-        # a --category or --exclude filter silently ran every rule anyway.
-        include = {i.strip().upper() for i in options.include_ids} if options.include_ids else None
-        exclude = {e.strip().upper() for e in options.exclude_ids} if options.exclude_ids else set()
-        selected_rules = [
-            r
-            for r in rules
-            if (options.categories is None or r.category in options.categories)
-            and (options.targets is None or r.target in options.targets)
-            and (include is None or r.check_id in include)
-            and r.check_id not in exclude
-        ]
-        findings.extend(run_rules(selected_rules, assets))
+        checks.extend(c for c in map(RuleCheck, rules) if wanted(c.meta))
+
+    context = check_base.CheckContext(
+        assets=assets,
+        project_root=options.project_root,
+        home=home,
+        options={"verbose": options.verbose, "reviews": list(options.reviews)},
+    )
+
+    findings: list[Finding] = []
+    for check in checks:
+        try:
+            produced = check.run(context)
+        except Exception as exc:  # a hostile asset must not kill the scan
+            produced = [
+                Finding(
+                    meta=check.meta,
+                    status=Status.ERROR,
+                    asset="-",
+                    detail=f"Check raised {type(exc).__name__}: {exc}",
+                )
+            ]
+        findings.extend(produced or [])
 
     # 6-7. Normalization and risk classification
     expired = _apply_exceptions(findings, options.exceptions)

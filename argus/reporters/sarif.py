@@ -119,6 +119,8 @@ def _result(finding: Finding, rule_index: int) -> dict[str, Any]:
             "confidence": finding.confidence.value,
             "asset": finding.asset,
             "acceptedRisk": finding.accepted_risk,
+            "suppressed": finding.suppressed,
+            "advisory": finding.advisory,
         },
     }
     if finding.status is Status.MANUAL:
@@ -126,9 +128,17 @@ def _result(finding: Finding, rule_index: int) -> dict[str, Any]:
         # adjudication; a MANUAL result must not read as a confirmed failure.
         result["kind"] = "review"
         result["level"] = "note"
+    if finding.advisory:
+        # Advisory findings never gate. A CI that fails on SARIF "error" would
+        # otherwise gate on a model's judgement.
+        result["level"] = "note"
     if finding.accepted_risk:
         result["suppressions"] = [
             {"kind": "external", "justification": finding.acceptance_reason or "accepted risk"}
+        ]
+    if finding.suppressed:
+        result["suppressions"] = [
+            {"kind": "external", "justification": finding.suppression_reason or "false positive"}
         ]
     return result
 

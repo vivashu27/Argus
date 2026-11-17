@@ -156,7 +156,7 @@ def score_findings(
     for finding in findings:
         setattr(summary, status_counters[finding.status], getattr(summary, status_counters[finding.status]) + 1)
 
-        if finding.status in (Status.FAIL, Status.WARN):
+        if finding.is_issue:
             attr = severity_counters[finding.severity]
             setattr(summary, attr, getattr(summary, attr) + 1)
 
@@ -164,7 +164,7 @@ def score_findings(
             # A model's judgement. Counted and reported in full, but never scored:
             # the same environment can be judged differently on two runs, and a
             # score that moves without the environment moving is not a measurement.
-            if finding.status in (Status.FAIL, Status.WARN):
+            if finding.is_issue:
                 summary.advisory += 1
             continue
         if finding.suppressed:

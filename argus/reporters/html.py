@@ -17,8 +17,7 @@ from typing import Any
 from ..benchmarks.aasb_v1 import DISCLAIMER, FULL_NAME, benchmark_coverage
 from ..core.engine import ScanReport
 from ..core.models import Finding, Severity, Status
-
-SEVERITY_ORDER = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO)
+from ..core.severity import SEVERITY_ORDER
 
 SEVERITY_COLOR = {
     Severity.CRITICAL: "#b3123a",
@@ -137,7 +136,7 @@ def _severity_bar(summary: Any) -> str:
 def _category_chart(findings: list[Finding]) -> str:
     counts: dict[str, int] = {}
     for finding in findings:
-        if finding.status in (Status.FAIL, Status.WARN):
+        if finding.is_issue:
             counts[finding.meta.category.display] = counts.get(finding.meta.category.display, 0) + 1
     if not counts:
         return '<p class="sub">No findings by category.</p>'
@@ -209,6 +208,12 @@ def _finding_block(finding: Finding) -> str:
             f"{_e(finding.acceptance_reason)} This finding remains visible and is excluded "
             f"from the exit-code gate.</div>"
         )
+    if finding.suppressed:
+        parts.append(
+            f'<div class="accepted"><strong>False positive.</strong> '
+            f"{_e(finding.suppression_reason)} This finding remains visible and is excluded "
+            f"from the score and the exit-code gate.</div>"
+        )
 
     parts.append(
         f'<div class="remediation"><strong>Remediation.</strong> {_e(meta.remediation)}</div>'
@@ -236,7 +241,7 @@ def render(report: ScanReport) -> str:
     metadata = report.result.metadata
     findings = report.result.findings
 
-    issues = [f for f in findings if f.status in (Status.FAIL, Status.WARN)]
+    issues = [f for f in findings if f.is_issue]
     issues.sort(key=lambda f: (-f.severity.rank, f.check_id))
     manual = [f for f in findings if f.status is Status.MANUAL]
     passed = [f for f in findings if f.status is Status.PASS]

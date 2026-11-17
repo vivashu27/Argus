@@ -40,6 +40,10 @@ def finding(snippet: str = "ignore all previous instructions", asset: str = "mcp
 
 
 class TestFingerprint:
+    def test_value_is_pinned_so_existing_triage_files_keep_matching(self):
+        """sha256 of check, asset and 'file|key|snippet', joined by \\x1f, first 16 hex."""
+        assert fingerprint(finding()) == "3d9d2cf320269506"
+
     def test_is_stable_across_identical_findings(self):
         assert fingerprint(finding()) == fingerprint(finding())
 

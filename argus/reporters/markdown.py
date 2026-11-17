@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from ..benchmarks.aasb_v1 import DISCLAIMER, benchmark_coverage
 from ..core.engine import ScanReport
-from ..core.models import Finding, Severity, Status
-
-SEVERITY_ORDER = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO)
+from ..core.models import Finding, Status
+from ..core.severity import SEVERITY_ORDER
 
 
 def _issues(report: ScanReport) -> list[Finding]:
-    issues = [f for f in report.result.findings if f.status in (Status.FAIL, Status.WARN)]
+    issues = [f for f in report.result.findings if f.is_issue]
     issues.sort(key=lambda f: (-f.severity.rank, f.check_id))
     return issues
 
@@ -43,6 +42,11 @@ def render(report: ScanReport) -> str:
         )
     if summary.accepted_risk:
         out.append(f"{summary.accepted_risk} finding(s) are recorded as accepted risk.\n")
+    if summary.suppressed:
+        out.append(
+            f"{summary.suppressed} finding(s) are suppressed as false positives and "
+            "excluded from the score.\n"
+        )
 
     # Posture
     out.append("## Security Posture\n")
@@ -116,6 +120,8 @@ def render(report: ScanReport) -> str:
 
         if finding.accepted_risk:
             out.append(f"**Accepted risk.** {finding.acceptance_reason}\n")
+        if finding.suppressed:
+            out.append(f"**False positive.** {finding.suppression_reason}\n")
         out.append(f"**Remediation.** {meta.remediation}\n")
 
         if meta.compliance:

@@ -221,6 +221,11 @@ clean-looking result.
 `argus rule test` is the same thing with evidence always shown, and it takes its rule
 paths as arguments rather than as a flag.
 
+The selection flags `--category`, `--target`, `--check`, `--exclude` and `--level`
+apply to rules exactly as they do to built-in checks. Rules are level-2 controls, so
+`--level 1` leaves them out. A rule finding can be marked a false positive with
+`argus triage add CUSTOM-<ID>` like any other finding.
+
 Or persist them in `argus.yaml`:
 
 ```yaml

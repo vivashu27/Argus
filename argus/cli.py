@@ -26,8 +26,8 @@ from .benchmarks import aasb_v1
 from .config import ArgusConfig, find_config, load_config
 from .core.engine import Exception_, ScanOptions, ScanReport, run_scan
 from .core.exceptions import ArgusConfigError, ArgusScanError
-from .core.models import Category, Severity, Status, Target
-from .core.registry import all_checks, get_check
+from .core.models import Category, Severity, Target
+from .core.registry import all_checks, get_check, select
 from .core.severity import filter_for_display, gating_findings
 from .reporters import FORMATS, extension, render, terminal
 
@@ -292,14 +292,12 @@ def list_checks(
     table.add_column("Title")
 
     count = 0
-    for check_cls in all_checks():
+    for check_cls in select(
+        categories={want_category} if want_category else None,
+        targets={want_target} if want_target else None,
+        level=level,
+    ):
         meta = check_cls.meta
-        if want_category and meta.category is not want_category:
-            continue
-        if want_target and want_target not in meta.applies_to:
-            continue
-        if level is not None and meta.aasb_level > level:
-            continue
         count += 1
         table.add_row(
             meta.check_id,
@@ -417,11 +415,7 @@ def check(
         _fail(f"scan failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
 
     terminal.render(report, console=console, verbose=verbose)
-    raise typer.Exit(
-        EXIT_FINDINGS
-        if any(f.status is Status.FAIL and not f.accepted_risk for f in report.result.findings)
-        else EXIT_OK
-    )
+    raise typer.Exit(EXIT_FINDINGS if report.result.open_findings() else EXIT_OK)
 
 
 @app.command()
@@ -671,9 +665,7 @@ def rule_test(
         _fail(f"scan failed: {type(exc).__name__}: {exc}", EXIT_SCANNER_ERROR)
 
     terminal.render(report, console=console, verbose=True)
-    raise typer.Exit(
-        EXIT_FINDINGS if any(f.is_open for f in report.result.findings) else EXIT_OK
-    )
+    raise typer.Exit(EXIT_FINDINGS if report.result.open_findings() else EXIT_OK)
 
 
 def _triage_path(explicit: Path | None, directory: Path) -> Path | None:
@@ -712,7 +704,13 @@ def triage_add(
     """
     import json as _json
 
-    from .core.triage import DEFAULT_TRIAGE_FILE, TriageEntry, load_triage, save_triage
+    from .core.triage import (
+        DEFAULT_TRIAGE_FILE,
+        TriageEntry,
+        fingerprint_record,
+        load_triage,
+        save_triage,
+    )
 
     if not reason.strip():
         _fail("--reason cannot be empty. Every suppression must say why the finding is wrong.")
@@ -737,7 +735,7 @@ def triage_add(
 
     added = 0
     for finding in matches:
-        mark = _fingerprint_from_report(finding)
+        mark = fingerprint_record(finding)
         if mark in known:
             continue
         entries.append(
@@ -758,37 +756,6 @@ def triage_add(
     )
     err_console.print(
         Text("  Suppressed findings are still counted and listed in every report.", "dim")
-    )
-
-
-def _fingerprint_from_report(finding: dict) -> str:
-    """Rebuild a finding's fingerprint from its serialised form.
-
-    Kept identical to :func:`argus.core.triage.fingerprint` by reconstructing the
-    finding rather than duplicating the hash, so the two can never drift.
-    """
-    from .core.models import Evidence, Finding, Status
-    from .core.registry import get_check
-    from .core.triage import fingerprint
-
-    check = get_check(str(finding.get("id", "")))
-    if check is None:
-        _fail(f"unknown check in report: {finding.get('id')!r}")
-        raise AssertionError  # unreachable: _fail raises
-    return fingerprint(
-        Finding(
-            meta=check.meta,
-            status=Status(finding.get("status", "FAIL")),
-            asset=str(finding.get("asset", "")),
-            detail=str(finding.get("detail", "")),
-            evidence=[
-                Evidence(
-                    path=e.get("path"), line=e.get("line"), key=e.get("key"),
-                    snippet=e.get("snippet"), reason=e.get("reason", ""),
-                )
-                for e in finding.get("evidence", [])
-            ],
-        )
     )
 
 

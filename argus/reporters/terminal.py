@@ -11,6 +11,7 @@ from rich.text import Text
 from ..benchmarks.aasb_v1 import benchmark_coverage
 from ..core.engine import ScanReport
 from ..core.models import Finding, ScanMetadata, Severity, Status
+from ..core.severity import SEVERITY_ORDER
 
 #: "ANSI Shadow" block lettering. Box-drawing glyphs need a UTF-8 capable stream,
 #: so :func:`_supports_unicode` gates it and a plain fallback is always available.
@@ -57,8 +58,6 @@ STATUS_STYLE = {
     Status.NOT_APPLICABLE: "dim",
     Status.ERROR: "bold white on dark_red",
 }
-
-SEVERITY_ORDER = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO)
 
 
 def _supports_unicode(out: Console) -> bool:
@@ -210,7 +209,7 @@ def render(report: ScanReport, console: Console | None = None, verbose: bool = F
         )
 
     # Findings
-    issues = [f for f in report.result.findings if f.status in (Status.FAIL, Status.WARN)]
+    issues = [f for f in report.result.findings if f.is_issue]
     issues.sort(key=lambda f: (-f.severity.rank, f.check_id))
 
     if issues:
