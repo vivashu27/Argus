@@ -6,6 +6,8 @@ produce findings without executing anything it contains.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -348,6 +350,71 @@ class TestReporters:
             assert "Score Derivation" in markdown
 
 
+def _report_of(findings):
+    from argus.core.engine import ScanReport
+    from argus.core.models import ScanMetadata, ScanResult
+    from argus.core.scoring import score_findings
+
+    metadata = ScanMetadata(
+        timestamp="t", hostname="h", platform="p", scanner_version="v", benchmark="b"
+    )
+    return ScanReport(
+        result=ScanResult(metadata=metadata, findings=findings),
+        summary=score_findings(findings),
+    )
+
+
+def _finding(check_id: str, category, *, advisory: bool = False, **state):
+    from argus.core.models import CheckMeta, Finding, Severity
+
+    meta = CheckMeta(
+        check_id=check_id, title="t", description="d", category=category,
+        severity=Severity.HIGH, aasb_level=1, applies_to=frozenset({Target.MCP}),
+        advisory=advisory,
+    )
+    return Finding(meta=meta, status=Status.FAIL, asset="mcp:s", detail="seen", **state)
+
+
+class TestReportersDiscloseOutcome:
+    """A false positive or an advisory verdict reads as one in every format."""
+
+    @pytest.fixture
+    def report(self):
+        return _report_of([
+            _finding("MCP-013", Category.MCP, suppressed=True,
+                     suppression_reason="matches our own fixture"),
+            _finding("DYN-001", Category.DYNAMIC, advisory=True),
+            _finding("MCP-003", Category.MCP),
+        ])
+
+    def _sarif_results(self, report):
+        return {r["ruleId"]: r for r in json.loads(render("sarif", report))["runs"][0]["results"]}
+
+    def test_sarif_marks_a_false_positive_suppressed(self, report):
+        suppression = self._sarif_results(report)["MCP-013"]["suppressions"][0]
+        assert suppression["justification"] == "matches our own fixture"
+
+    def test_sarif_ordinary_failure_is_unchanged(self, report):
+        result = self._sarif_results(report)["MCP-003"]
+        assert result["level"] == "error"
+        assert "suppressions" not in result
+
+    def test_sarif_advisory_finding_cannot_fail_ci(self, report):
+        result = self._sarif_results(report)["DYN-001"]
+        assert result["level"] == "note"
+        assert result["properties"]["advisory"] is True
+
+    @pytest.mark.parametrize("fmt", ["html", "markdown"])
+    def test_false_positive_reason_is_shown(self, report, fmt):
+        assert "matches our own fixture" in render(fmt, report)
+
+    def test_csv_says_which_rows_are_false_positives(self, report):
+        rows = list(csv.DictReader(io.StringIO(render("csv", report))))
+        assert {r["check_id"]: r["suppressed"] for r in rows} == {
+            "MCP-013": "yes", "DYN-001": "no", "MCP-003": "no",
+        }
+
+
 class TestCli:
     def _run(self, args, cwd):
         import subprocess
@@ -576,6 +643,37 @@ class TestRuleSelection:
     def test_include_by_check_id(self, tmp_path):
         assert self._ran(tmp_path, include_ids=["CUSTOM-SEL-TEST"])
         assert not self._ran(tmp_path, include_ids=["MCP-003"])
+
+    def test_level_applies_to_rules(self, tmp_path):
+        """Rules are level-2 controls, so --level 1 leaves them out like any other."""
+        assert not self._ran(tmp_path, level=1)
+        assert self._ran(tmp_path, level=2)
+
+
+class TestRuleTriage:
+    def test_a_rule_finding_can_be_marked_a_false_positive(self, tmp_path):
+        """Rules are not in the check registry; triage must not need them to be."""
+        from typer.testing import CliRunner
+
+        from argus.cli import app
+        from argus.core.triage import load_triage
+
+        home, project, rules = _rule_env(tmp_path)
+        options = {"project_root": project, "home": home, "user_scope": False,
+                   "rule_paths": rules}
+        report_file, triage_file = tmp_path / "r.json", tmp_path / "triage.yaml"
+        report_file.write_text(render("json", run_scan(ScanOptions(**options))))
+
+        result = CliRunner().invoke(app, [
+            "triage", "add", "CUSTOM-SEL-TEST", "--reason", "ours",
+            "--report", str(report_file), "--file", str(triage_file),
+        ])
+        assert result.exit_code == 0, result.output
+        assert load_triage(triage_file)
+
+        rescanned = run_scan(ScanOptions(**options, triage_path=triage_file))
+        rule_hits = [f for f in rescanned.result.findings if f.check_id == "CUSTOM-SEL-TEST"]
+        assert rule_hits and all(f.suppressed for f in rule_hits)
 
 
 class TestRulesOnly:

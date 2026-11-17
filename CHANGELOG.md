@@ -3,6 +3,22 @@
 All notable changes to Argus are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`triage add` accepts custom rule findings.** It rejected every `CUSTOM-*`
+  finding with "unknown check in report", so a false positive from a rule could
+  not be suppressed.
+- **`--level` applies to custom rules.** Rules are level-2 controls but still ran
+  under `--level 1`. Rules now run through the same selection as built-in checks.
+- **Reports disclose false positives everywhere.** HTML and Markdown show the
+  suppression reason, Markdown counts suppressed findings, CSV gains a `suppressed`
+  column, and SARIF gives them a `suppressions` entry carrying the reason, so
+  code-scanning tools treat them as dismissed.
+- **Advisory findings are SARIF `note`.** A CI that fails on SARIF errors could
+  otherwise gate on an LLM-judged `DYN-*` finding, which never gates the exit code.
+
 ## [1.3.0] — 2026-11-06
 
 Detection gaps in Skills: malicious test Skills that hid instructions in their

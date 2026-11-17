@@ -6,7 +6,7 @@ requires editing the engine (spec 4).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any, Protocol, TypeVar, cast
 
 from .exceptions import ArgusConfigError
@@ -62,6 +62,38 @@ def get_check(check_id: str) -> type[CheckClass] | None:
     return None
 
 
+def selection(
+    *,
+    targets: Iterable[Target] | None = None,
+    categories: Iterable[Category] | None = None,
+    include_ids: Iterable[str] | None = None,
+    exclude_ids: Iterable[str] | None = None,
+    level: int | None = None,
+) -> Callable[[CheckMeta], bool]:
+    """The selection flags as a predicate over check metadata.
+
+    Applies equally to registered checks and to custom rules, which are never
+    registered. Composition order is fixed by spec 9: start from
+    target/category/level, intersect with ``include_ids`` when given, then subtract
+    ``exclude_ids``. Exclusion always wins over inclusion.
+    """
+    target_set = set(targets) if targets else None
+    category_set = set(categories) if categories else None
+    include_set = {i.strip().upper() for i in include_ids} if include_ids else None
+    exclude_set = {e.strip().upper() for e in exclude_ids} if exclude_ids else set()
+
+    def wanted(meta: CheckMeta) -> bool:
+        return (
+            (target_set is None or bool(meta.applies_to & target_set))
+            and (category_set is None or meta.category in category_set)
+            and (level is None or meta.aasb_level <= level)
+            and (include_set is None or meta.check_id in include_set)
+            and meta.check_id not in exclude_set
+        )
+
+    return wanted
+
+
 def select(
     *,
     targets: Iterable[Target] | None = None,
@@ -70,32 +102,15 @@ def select(
     exclude_ids: Iterable[str] | None = None,
     level: int | None = None,
 ) -> list[type[CheckClass]]:
-    """Resolve a check selection.
-
-    Composition order is fixed by spec 9: start from target/category/level, intersect
-    with ``include_ids`` when given, then subtract ``exclude_ids``. Exclusion always
-    wins over inclusion.
-    """
-    target_set = set(targets) if targets else None
-    category_set = set(categories) if categories else None
-    include_set = {i.strip().upper() for i in include_ids} if include_ids else None
-    exclude_set = {e.strip().upper() for e in exclude_ids} if exclude_ids else set()
-
-    selected: list[type[CheckClass]] = []
-    for cls in all_checks():
-        meta = cls.meta
-        if target_set is not None and not (meta.applies_to & target_set):
-            continue
-        if category_set is not None and meta.category not in category_set:
-            continue
-        if level is not None and meta.aasb_level > level:
-            continue
-        if include_set is not None and meta.check_id not in include_set:
-            continue
-        if meta.check_id in exclude_set:
-            continue
-        selected.append(cls)
-    return selected
+    """The registered checks a selection resolves to. See :func:`selection`."""
+    wanted = selection(
+        targets=targets,
+        categories=categories,
+        include_ids=include_ids,
+        exclude_ids=exclude_ids,
+        level=level,
+    )
+    return [cls for cls in all_checks() if wanted(cls.meta)]
 
 
 def iter_meta() -> Iterator[CheckMeta]:

@@ -29,16 +29,16 @@ are validated at load time and applied under input-length caps.
 
 from __future__ import annotations
 
-from .engine import evaluate_rule, run_rules
+from .engine import RuleCheck, evaluate_rule
 from .loader import RuleError, load_rule_file, load_rules
 from .model import Rule, RuleMatch
 
 __all__ = [
     "Rule",
+    "RuleCheck",
     "RuleError",
     "RuleMatch",
     "evaluate_rule",
     "load_rule_file",
     "load_rules",
-    "run_rules",
 ]

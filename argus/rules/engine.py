@@ -15,13 +15,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..analysis.redaction import truncate
+from ..checks.base import Check, CheckContext
 from ..core.models import (
     Asset,
     CheckMeta,
-    Confidence,
     Evidence,
     Finding,
-    Status,
 )
 from .model import MAX_MATCH_INPUT, Condition, Rule
 
@@ -259,67 +258,38 @@ def _meta_for(rule: Rule) -> CheckMeta:
     )
 
 
-def run_rules(rules: list[Rule], assets: list[Asset]) -> list[Finding]:
-    """Evaluate every rule against every applicable asset.
+class RuleCheck(Check):
+    """A custom rule adapted to the check interface.
 
-    A rule that raises is reported as an ERROR finding rather than aborting the
-    scan, matching how the engine treats a built-in check.
+    The engine selects, runs and backstops it exactly like a built-in check, so the
+    selection flags and finding conventions cannot drift between the two.
     """
-    findings: list[Finding] = []
 
-    for rule in rules:
-        meta = _meta_for(rule)
-        applicable = [a for a in assets if a.target is rule.target]
+    def __init__(self, rule: Rule) -> None:
+        self.rule = rule
+        self.meta = _meta_for(rule)
 
+    def run(self, context: CheckContext) -> list[Finding]:
+        rule = self.rule
+        applicable = context.by_target(rule.target)
         if not applicable:
-            findings.append(
-                Finding(
-                    meta=meta,
-                    status=Status.NOT_APPLICABLE,
-                    asset="-",
-                    detail=f"No '{rule.target.value}' assets discovered",
-                    na_reason=f"No '{rule.target.value}' assets discovered",
-                )
-            )
-            continue
+            return self.no_assets(f"'{rule.target.value}' assets")
 
-        matched_any = False
+        findings: list[Finding] = []
         for asset in applicable:
             try:
                 matched, evidence = evaluate_rule(rule, asset)
-            except Exception as exc:  # a bad rule must not kill the scan
+            except Exception as exc:  # one bad asset must not hide the rule's other results
                 findings.append(
-                    Finding(
-                        meta=meta,
-                        status=Status.ERROR,
-                        asset=asset.asset_id,
-                        detail=f"Rule '{rule.rule_id}' raised {type(exc).__name__}: {exc}",
-                        confidence=Confidence.LOW,
+                    self.error(
+                        asset.asset_id,
+                        f"Rule '{rule.rule_id}' raised {type(exc).__name__}: {exc}",
                     )
                 )
-                matched_any = True
                 continue
             if matched:
-                matched_any = True
-                findings.append(
-                    Finding(
-                        meta=meta,
-                        status=Status.FAIL,
-                        asset=asset.asset_id,
-                        detail=rule.name,
-                        evidence=evidence,
-                        confidence=Confidence.HIGH,
-                    )
-                )
+                findings.append(self.fail(asset.asset_id, rule.name, evidence))
 
-        if not matched_any:
-            findings.append(
-                Finding(
-                    meta=meta,
-                    status=Status.PASS,
-                    asset=rule.target.value,
-                    detail=f"No {rule.target.value} asset matched rule '{rule.rule_id}'.",
-                )
-            )
-
-    return findings
+        return findings or [
+            self.ok(rule.target.value, f"No {rule.target.value} asset matched rule '{rule.rule_id}'.")
+        ]

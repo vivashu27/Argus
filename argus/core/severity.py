@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from .models import Finding, Severity, Status
 
+#: Most severe first, the order every report lists severities in.
+SEVERITY_ORDER = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO)
+
 
 def at_or_above(severity: Severity, threshold: Severity) -> bool:
     return severity.rank >= threshold.rank

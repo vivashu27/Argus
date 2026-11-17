@@ -21,6 +21,7 @@ import datetime as _dt
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .exceptions import ArgusConfigError
 from .models import Finding
@@ -41,23 +42,34 @@ def fingerprint(finding: Finding) -> str:
     fingerprint, which is the point: an edited finding is a new finding and must be
     looked at again rather than inheriting an old verdict.
     """
-    parts = [finding.check_id, finding.asset]
-    if finding.evidence:
+    return fingerprint_record(finding.to_dict())
+
+
+def fingerprint_record(record: dict[str, Any]) -> str:
+    """:func:`fingerprint` of a finding in its serialised form (a JSON report entry).
+
+    The live finding is fingerprinted through its serialised form too, so the two
+    cannot drift, and a report can be triaged without the check being registered —
+    a custom rule never is.
+    """
+    evidence = record.get("evidence") or []
+    parts = [str(record.get("id", "")), str(record.get("asset", ""))]
+    if evidence:
         parts.extend(
             sorted(
                 "|".join(
                     (
-                        Path(item.path).name if item.path else "",
-                        item.key or "",
-                        item.snippet or "",
+                        Path(item["path"]).name if item.get("path") else "",
+                        item.get("key") or "",
+                        item.get("snippet") or "",
                     )
                 )
-                for item in finding.evidence
+                for item in evidence
             )
         )
     else:
         # Some findings carry no evidence; the detail is then all that identifies them.
-        parts.append(finding.detail)
+        parts.append(str(record.get("detail", "")))
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
 
 

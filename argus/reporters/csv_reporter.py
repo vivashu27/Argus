@@ -10,7 +10,7 @@ from ..core.engine import ScanReport
 COLUMNS = (
     "check_id", "aasb", "title", "category", "severity", "status", "confidence",
     "aasb_level", "asset", "detail", "evidence_count", "evidence", "remediation",
-    "accepted_risk", "compliance",
+    "accepted_risk", "compliance", "suppressed",
 )
 
 
@@ -56,6 +56,7 @@ def render(report: ScanReport) -> str:
                 meta.remediation,
                 "yes" if finding.accepted_risk else "no",
                 compliance,
+                "yes" if finding.suppressed else "no",
             ]
         )
     return buffer.getvalue()

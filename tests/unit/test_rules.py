@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from argus.checks.base import CheckContext
 from argus.core.models import Asset, Category, Severity, Status, Target
 from argus.rules import engine, load_rules
 from argus.rules.generate import generate_rule
@@ -36,6 +37,12 @@ def mcp(name: str, command: str, args: list[str], **extra) -> Asset:
     data = {"name": name, "command": command, "args": args, "env": {}, "url": "", **extra}
     return Asset(asset_id=f"mcp:{name}", target=Target.MCP, path=Path("/t/.mcp.json"),
                  data=data, text=json.dumps(data), source="/t/.mcp.json")
+
+
+def _run_rules(rules, assets):
+    """Run rules the way the engine does: each one adapted to the check interface."""
+    context = CheckContext(assets=assets, project_root=Path("/t"), home=Path("/t"))
+    return [f for rule in rules for f in engine.RuleCheck(rule).run(context)]
 
 
 def write(tmp_path: Path, body: str, name: str = "r.argus") -> Path:
@@ -183,7 +190,7 @@ class TestEvaluation:
         from argus.core.severity import gating_findings
 
         rule = self._rule(tmp_path)
-        findings = engine.run_rules([rule], [mcp("bad", "npx", ["@x/srv"])])
+        findings = _run_rules([rule], [mcp("bad", "npx", ["@x/srv"])])
         fails = [f for f in findings if f.status is Status.FAIL]
         assert fails
         assert fails[0].meta.category is Category.MCP, "filed under its target's domain"
@@ -192,18 +199,18 @@ class TestEvaluation:
 
     def test_pass_when_nothing_matches(self, tmp_path):
         rule = self._rule(tmp_path)
-        findings = engine.run_rules([rule], [mcp("ok", "npx", ["@x/srv@1.0.0"])])
+        findings = _run_rules([rule], [mcp("ok", "npx", ["@x/srv@1.0.0"])])
         assert findings[0].status is Status.PASS
 
     def test_not_applicable_without_assets(self, tmp_path):
-        findings = engine.run_rules([self._rule(tmp_path)], [])
+        findings = _run_rules([self._rule(tmp_path)], [])
         assert findings[0].status is Status.NOT_APPLICABLE
 
     def test_custom_rules_have_no_fabricated_aasb_number(self, tmp_path):
         """Rules are not benchmark items, so they report a category slug rather than
         a number. Regression for an int() crash on slug-based check IDs."""
         rule = self._rule(tmp_path)
-        findings = engine.run_rules([rule], [mcp("bad", "npx", ["@x/srv"])])
+        findings = _run_rules([rule], [mcp("bad", "npx", ["@x/srv"])])
         aasb = findings[0].meta.aasb
         assert aasb == "mcp"
         assert not any(ch.isdigit() for ch in aasb), "must not look like a benchmark number"
@@ -341,7 +348,7 @@ class TestCategorisation:
 
     def test_finding_carries_the_declared_category(self, tmp_path):
         rule = self._rule(tmp_path, extra="category: secrets\n")
-        findings = engine.run_rules([rule], [mcp("x", "srv", [])])
+        findings = _run_rules([rule], [mcp("x", "srv", [])])
         assert findings[0].meta.category is Category.SECRETS
 
 
